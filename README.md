@@ -329,6 +329,13 @@ class MyFakeQuantize(FakeQuantizeBase):
 
 ### 最近更新
 
+- **2026-03-11**：修复 PTQ 流程中的形状不匹配错误
+  - 修复 `FakeQuantize` 类：确保从 observer 中获取正确的参数（dtype、qscheme、ch_axis 等）
+  - 修复 `LSQFakeQuantize` 类：添加相同的参数同步逻辑
+  - 修复 `PACTFakeQuantize` 类：添加相同的参数同步逻辑
+  - 修复 `metrics.py`：修复 SSIM 计算中的 torch.exp 调用错误
+  - 验证 NAFNet 模型的 PTQ 流程完全通过
+
 - **2026-03-11**：拆分 observer 模块，将不同类型的 observer 分离到单独文件中
   - 添加 `histogram_observer.py`：实现 HistogramObserver
   - 添加 `moving_average_min_max_observer.py`：实现 MovingAverageMinMaxObserver

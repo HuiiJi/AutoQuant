@@ -30,6 +30,14 @@ class FakeQuantize(FakeQuantizeBase):
         ch_axis: int = 0,
         enabled: bool = True,
     ):
+        # 如果提供了observer，使用observer的参数
+        if observer is not None:
+            dtype = observer.dtype
+            qscheme = observer.qscheme
+            quant_min = observer.quant_min
+            quant_max = observer.quant_max
+            ch_axis = observer.ch_axis
+        
         super().__init__(
             observer=observer,
             dtype=dtype,
@@ -99,6 +107,14 @@ class LSQFakeQuantize(FakeQuantizeBase):
         enabled: bool = True,
         init_scale: Optional[torch.Tensor] = None,
     ):
+        # 如果提供了observer，使用observer的参数
+        if observer is not None:
+            dtype = observer.dtype
+            qscheme = observer.qscheme
+            quant_min = observer.quant_min
+            quant_max = observer.quant_max
+            ch_axis = observer.ch_axis
+        
         super().__init__(
             observer=observer,
             dtype=dtype,
@@ -174,6 +190,14 @@ class PACTFakeQuantize(FakeQuantizeBase):
         enabled: bool = True,
         init_alpha: float = 10.0,
     ):
+        # 如果提供了observer，使用observer的参数
+        if observer is not None:
+            dtype = observer.dtype
+            qscheme = observer.qscheme
+            quant_min = observer.quant_min
+            quant_max = observer.quant_max
+            ch_axis = observer.ch_axis
+        
         super().__init__(
             observer=observer,
             dtype=dtype,

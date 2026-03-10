@@ -116,7 +116,7 @@ def _create_window(window_size: int, channel: int) -> torch.Tensor:
     """创建高斯窗口（SSIM内部使用）"""
     def gaussian(window_size, sigma):
         gauss = torch.Tensor([
-            torch.exp(-(x - window_size//2)**2 / float(2*sigma**2))
+            torch.exp(torch.tensor(-(x - window_size//2)**2 / float(2*sigma**2)))
             for x in range(window_size)
         ])
         return gauss / gauss.sum()
