@@ -8,7 +8,7 @@ import copy
 from typing import Dict, Optional, Set, Callable, List, Tuple
 from autoquant.utils import QConfig, get_default_qconfig, get_lsq_qconfig
 from autoquant.core import QuantDtype, QScheme
-from autoquant.quantization import prepare, convert
+
 from autoquant.utils.sensitivity_analysis import SensitivityAnalyzer
 
 
@@ -173,7 +173,7 @@ class MixedPrecisionQuantizer:
         # 为每个层应用配置
         # 注意：这里需要ModelQuantizer支持层级配置
         # 当前使用简化实现：先全部用默认配置，然后标记特殊层
-        from autoquant.quantization import prepare as base_prepare
+        from autoquant.quantization.api import prepare as base_prepare
         
         # 首先用默认配置准备
         prepared_model = base_prepare(model, self.default_qconfig, inplace=True)

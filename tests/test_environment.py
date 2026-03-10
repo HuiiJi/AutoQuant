@@ -3,11 +3,15 @@
 这是一个快速测试，用于验证环境配置
 """
 import sys
-sys.path.insert(0, '.')
+import os
+# 添加项目根目录到 Python 路径
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 print("=" * 70)
 print("AutoQuant 环境配置测试")
 print("=" * 70)
+print(f"Python版本: {sys.version}")
+print(f"sys.path: {sys.path}")
 
 print("\n1. 测试核心模块导入...")
 try:

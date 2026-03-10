@@ -24,6 +24,8 @@ from autoquant.observer import (
     MinMaxObserver,
     HistogramObserver,
     MovingAverageMinMaxObserver,
+    PercentileObserver,
+    MSEObserver,
 )
 
 # 导出FakeQuant
@@ -36,7 +38,7 @@ from autoquant.fake_quant import (
 )
 
 # 导出量化工具
-from autoquant.quantization import ModelQuantizer
+from autoquant.quantization.model_quantizer import ModelQuantizer
 from autoquant.onnx_export import (
     ONNXExporter,
     InferenceEngine,

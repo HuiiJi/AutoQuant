@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 from typing import Optional, Set
 from autoquant.utils import QConfig
-from .model_quantizer import ModelQuantizer
+from autoquant.quantization.model_quantizer import ModelQuantizer
 
 
 def prepare(

@@ -6,7 +6,7 @@ setup(
     description="专业的AI模型量化工具链条，参考MQBench设计，支持PTQ/QAT、混合精度量化、符号化追踪和ONNX导出",
     author="Your Name",
     author_email="your.email@example.com",
-    packages=find_packages(),
+    packages=find_packages(where="src"),
     install_requires=[
         "torch>=2.0.0",
         "torchvision>=0.15.0",
