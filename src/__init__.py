@@ -8,7 +8,7 @@ AutoQuant - 专业的模型量化工具链条
 __version__ = "1.0.0"
 
 # 导出核心模块
-from autoquant.core import (
+from .core import (
     QuantDtype,
     QScheme,
     round_ste,
@@ -19,7 +19,7 @@ from autoquant.core import (
 )
 
 # 导出Observer
-from autoquant.observer import (
+from .observer import (
     ObserverBase,
     MinMaxObserver,
     HistogramObserver,
@@ -29,7 +29,7 @@ from autoquant.observer import (
 )
 
 # 导出FakeQuant
-from autoquant.fake_quant import (
+from .fake_quant import (
     FakeQuantizeBase,
     FakeQuantize,
     FixedFakeQuantize,
@@ -38,8 +38,8 @@ from autoquant.fake_quant import (
 )
 
 # 导出量化工具
-from autoquant.quantization.model_quantizer import ModelQuantizer
-from autoquant.onnx_export import (
+from .quantization.model_quantizer import ModelQuantizer
+from .onnx_export import (
     ONNXExporter,
     InferenceEngine,
     EngineConfig,
@@ -51,7 +51,7 @@ from autoquant.onnx_export import (
     optimize_onnx,
     simplify_with_onnxsim,
 )
-from autoquant.utils import (
+from .utils import (
     QConfig,
     get_default_qconfig,
     get_per_channel_qconfig,
@@ -64,7 +64,7 @@ from autoquant.utils import (
     SensitivityAnalyzer,
 )
 
-from autoquant.evaluation import (
+from .evaluation import (
     QuantizationEvaluator,
     compute_accuracy,
     compute_psnr,
@@ -74,18 +74,15 @@ from autoquant.evaluation import (
     compute_cosine_similarity,
 )
 
-from autoquant.special_models import (
+from .special_models import (
     TransformerQuantizer,
     SmoothQuantQuantizer,
     KVCacheQuantizer,
     get_transformer_qconfig,
     get_smoothquant_qconfig,
-    NAFNet,
-    NAFBlock,
-    LayerNorm2d,
-    create_nafnet_simple,
-    create_nafnet_denoise,
-    create_nafnet_deblur,
+    NAFNet_flow,
+    NAFNet_dgf_4c,
+    NAFNet_dgf
 )
 
 __all__ = [
@@ -146,11 +143,8 @@ __all__ = [
     "KVCacheQuantizer",
     "get_transformer_qconfig",
     "get_smoothquant_qconfig",
-    "NAFNet",
-    "NAFBlock",
-    "LayerNorm2d",
-    "create_nafnet_simple",
-    "create_nafnet_denoise",
-    "create_nafnet_deblur",
+    "NAFNet_flow",
+    "NAFNet_dgf_4c",
+    "NAFNet_dgf"
 ]
 

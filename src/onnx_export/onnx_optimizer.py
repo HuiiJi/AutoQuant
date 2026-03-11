@@ -62,6 +62,8 @@ class ONNXOptimizer:
                 optimized_model = self._cleanup_unused_nodes(optimized_model)
             elif pass_name == "simplify_qdq":
                 optimized_model = self._simplify_qdq_patterns(optimized_model)
+            elif pass_name == "optimize_layernorm":
+                optimized_model = self._optimize_layernorm(optimized_model)
             else:
                 if verbose:
                     print(f"警告: 未知的优化pass: {pass_name}")
@@ -78,6 +80,7 @@ class ONNXOptimizer:
             "eliminate_identity",
             "simplify_qdq",
             "merge_qdq",
+            "optimize_layernorm",
             "cleanup",
         ]
 
@@ -180,13 +183,118 @@ class ONNXOptimizer:
                 # 确保axis属性正确
                 has_axis = any(attr.name == "axis" for attr in node.attribute)
                 if not has_axis:
-                    # 添加默认axis=1（对于权重通常是axis=0）
-                    # 这里简化处理，实际可能需要更智能的判断
-                    axis_attr = helper.make_attribute("axis", 0)
+                    # 智能判断axis值
+                    # 对于权重：通常是axis=0（输出通道）
+                    # 对于激活：通常是axis=1（通道维度）
+                    # 但需要根据输入形状来判断
+                    axis = 1  # 默认值
+                    
+                    # 尝试根据输入形状判断
+                    for input_name in node.input:
+                        for value_info in graph.input:
+                            if value_info.name == input_name:
+                                if len(value_info.type.tensor_type.shape.dim) == 4:
+                                    # 4D张量，可能是激活或权重
+                                    # 对于Conv2d权重：[out_channels, in_channels, kernel_h, kernel_w]
+                                    # 对于激活：[batch, channels, height, width]
+                                    axis = 0  # 权重
+                                break
+                        for initializer in graph.initializer:
+                            if initializer.name == input_name:
+                                if len(initializer.dims) == 4:
+                                    # 4D初始化器，通常是权重
+                                    axis = 0
+                                break
+                    
+                    axis_attr = helper.make_attribute("axis", axis)
                     node.attribute.append(axis_attr)
         
         return model
 
+    def _optimize_layernorm(self, model: onnx.ModelProto) -> onnx.ModelProto:
+        """优化LayerNorm操作，特别是针对NAFNet中的LayerNorm2d"""
+        graph = model.graph
+        new_nodes = []
+        nodes_to_remove = []
+        input_replacements = {}
+        
+        # 查找 permute -> layer_norm -> permute 模式
+        i = 0
+        while i < len(graph.node):
+            node = graph.node[i]
+            
+            # 检查是否是第一个permute
+            if node.op_type == "Transpose" and i + 2 < len(graph.node):
+                next_node = graph.node[i + 1]
+                next_next_node = graph.node[i + 2]
+                
+                # 检查是否是 layer_norm
+                if next_node.op_type == "LayerNormalization" and next_next_node.op_type == "Transpose":
+                    # 检查permute的顺序是否匹配
+                    # 对于LayerNorm2d: permute(0, 2, 3, 1) -> layer_norm -> permute(0, 3, 1, 2)
+                    permute1_order = None
+                    permute2_order = None
+                    
+                    for attr in node.attribute:
+                        if attr.name == "perm":
+                            # 检查 attr.ints 的类型
+                            if hasattr(attr.ints, '__iter__'):
+                                # 尝试获取每个元素的 i 属性，如果失败则直接使用元素
+                                try:
+                                    permute1_order = [dim.i for dim in attr.ints]
+                                except AttributeError:
+                                    permute1_order = list(attr.ints)
+                    
+                    for attr in next_next_node.attribute:
+                        if attr.name == "perm":
+                            # 检查 attr.ints 的类型
+                            if hasattr(attr.ints, '__iter__'):
+                                # 尝试获取每个元素的 i 属性，如果失败则直接使用元素
+                                try:
+                                    permute2_order = [dim.i for dim in attr.ints]
+                                except AttributeError:
+                                    permute2_order = list(attr.ints)
+                    
+                    if permute1_order == [0, 2, 3, 1] and permute2_order == [0, 3, 1, 2]:
+                        # 找到匹配的模式，创建一个新的LayerNormalization节点，直接在正确的维度上操作
+                        new_layernorm = helper.make_node(
+                            "LayerNormalization",
+                            inputs=[node.input[0]] + next_node.input[1:],
+                            outputs=[next_next_node.output[0]],
+                            name=f"optimized_layernorm_{i}"
+                        )
+                        
+                        # 复制LayerNormalization的属性
+                        for attr in next_node.attribute:
+                            if attr.name != "axis":
+                                new_layernorm.attribute.append(attr)
+                        
+                        # 设置axis为1（通道维度）
+                        axis_attr = helper.make_attribute("axis", 1)
+                        new_layernorm.attribute.append(axis_attr)
+                        
+                        # 添加新节点
+                        new_nodes.append(new_layernorm)
+                        
+                        # 标记要删除的节点
+                        nodes_to_remove.extend([i, i+1, i+2])
+                        
+                        # 跳过已处理的节点
+                        i += 3
+                        continue
+            
+            # 如果不是匹配的模式，添加到新节点列表
+            if i not in nodes_to_remove:
+                new_nodes.append(node)
+            i += 1
+        
+        # 替换节点
+        if nodes_to_remove:
+            del graph.node[:]
+            graph.node.extend(new_nodes)
+        
+        return model
+    
     def _cleanup_unused_nodes(self, model: onnx.ModelProto) -> onnx.ModelProto:
         """清理未使用的节点和initializer"""
         try:

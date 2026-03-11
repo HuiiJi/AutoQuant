@@ -12,12 +12,10 @@ from .transformer import (
     get_smoothquant_qconfig,
 )
 from .nafnet import (
-    NAFNet,
     NAFBlock,
-    LayerNorm2d,
-    create_nafnet_simple,
-    create_nafnet_denoise,
-    create_nafnet_deblur,
+    NAFNet_dgf,
+    NAFNet_dgf_4c,
+    NAFNet_flow
 )
 
 __all__ = [

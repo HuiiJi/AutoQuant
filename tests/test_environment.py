@@ -10,8 +10,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 print("=" * 70)
 print("AutoQuant 环境配置测试")
 print("=" * 70)
-print(f"Python版本: {sys.version}")
-print(f"sys.path: {sys.path}")
 
 print("\n1. 测试核心模块导入...")
 try:
@@ -131,8 +129,3 @@ except Exception as e:
 print("\n" + "=" * 70)
 print("✅ 所有环境配置测试通过！")
 print("=" * 70)
-print("\n接下来你可以:")
-print("  - 运行 examples/01_basic_ptq.py 学习基础PTQ量化")
-print("  - 运行 examples/02_advanced_qat.py 学习QAT量化")
-print("  - 运行 examples/03_engine_adapter.py 学习推理引擎适配")
-print("  - 运行 examples/04_sensitivity_analysis.py 学习敏感度分析")

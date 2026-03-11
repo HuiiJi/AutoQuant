@@ -21,6 +21,11 @@ from autoquant import (
 )
 
 
+@pytest.fixture
+def test_data():
+    return torch.randn(2, 3, 16, 16)
+
+
 class TestAutogradFunctions:
     """测试Autograd函数"""
     

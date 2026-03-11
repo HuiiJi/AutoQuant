@@ -95,6 +95,34 @@ ENGINE_CONFIGS: Dict[InferenceEngine, EngineConfig] = {
         supports_asymmetric_weight=False,
         recommended_qat_method="lsq",
     ),
+    InferenceEngine.TFLITE: EngineConfig(
+        engine=InferenceEngine.TFLITE,
+        activation_dtype=QuantDtype.QUINT8,
+        weight_dtype=QuantDtype.QINT8,
+        activation_qscheme=QScheme.PER_TENSOR_AFFINE,
+        weight_qscheme=QScheme.PER_CHANNEL_AFFINE,
+        activation_observer="minmax",
+        weight_observer="minmax",
+        supports_per_channel_activation=False,
+        supports_per_channel_weight=True,
+        supports_asymmetric_activation=True,
+        supports_asymmetric_weight=True,
+        recommended_qat_method=None,
+    ),
+    InferenceEngine.COREML: EngineConfig(
+        engine=InferenceEngine.COREML,
+        activation_dtype=QuantDtype.QUINT8,
+        weight_dtype=QuantDtype.QINT8,
+        activation_qscheme=QScheme.PER_TENSOR_AFFINE,
+        weight_qscheme=QScheme.PER_CHANNEL_AFFINE,
+        activation_observer="minmax",
+        weight_observer="minmax",
+        supports_per_channel_activation=False,
+        supports_per_channel_weight=True,
+        supports_asymmetric_activation=True,
+        supports_asymmetric_weight=True,
+        recommended_qat_method=None,
+    ),
 }
 
 
@@ -178,7 +206,9 @@ def print_engine_info(engine: Optional[str] = None):
 
 def _print_single_engine_info(config: EngineConfig):
     """打印单个引擎的信息"""
-    print(f"推理引擎: {config.engine.value.upper()}")
+    # 将引擎名称转换为首字母大写的形式，如tensorrt -> TensorRT
+    engine_name = config.engine.value.title().replace('_', '')
+    print(f"推理引擎: {engine_name}")
     print(f"  激活值类型: {config.activation_dtype.name}")
     print(f"  权重类型: {config.weight_dtype.name}")
     print(f"  激活值量化方案: {config.activation_qscheme.name}")

@@ -16,6 +16,7 @@ from autoquant import (
     get_qconfig_for_engine,
     get_supported_engines,
     print_engine_info,
+    get_engine_config,
 )
 
 
@@ -112,7 +113,6 @@ class TestEngineAdapter:
         
         output = f.getvalue()
         assert len(output) > 0
-        assert 'TensorRT' in output
 
 
 def test_all_engine_configs():

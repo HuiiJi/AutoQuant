@@ -159,6 +159,9 @@ class LSQQuantize(Function):
         # 梯度归一化（LSQ论文中的技巧）
         grad_scale = grad_scale / (torch.sqrt(torch.tensor(quant_max - quant_min)))
 
+        # 确保grad_scale的形状与scale相同
+        grad_scale = grad_scale.view(scale.shape)
+
         return grad_x, grad_scale, None, None, None
 
 
@@ -181,7 +184,9 @@ class PACTQuantize(Function):
         ctx.quant_max = quant_max
 
         # PACT裁剪：min(max(x, 0), alpha)
-        x_clamped = torch.clamp(x, 0, alpha)
+        # 将 0 转换为与 x 同类型的张量
+        zero = torch.tensor(0, dtype=x.dtype, device=x.device)
+        x_clamped = torch.clamp(x, zero, alpha)
         
         # 量化
         x_int = torch.round(x_clamped / scale + zero_point)
@@ -206,6 +211,9 @@ class PACTQuantize(Function):
 
         # alpha的梯度
         grad_alpha = grad_output[x > alpha].sum()
+
+        # 确保grad_alpha的形状与alpha相同
+        grad_alpha = grad_alpha.view(alpha.shape)
 
         return grad_x, grad_alpha, None, None, None, None
 

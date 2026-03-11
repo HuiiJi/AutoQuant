@@ -77,6 +77,14 @@ class FakeQuantizeBase(nn.Module, ABC):
         """启用fake quant"""
         self.enabled = True
 
+    def disable(self):
+        """禁用fake quant（别名）"""
+        self.disable_fake_quant()
+
+    def enable(self):
+        """启用fake quant（别名）"""
+        self.enable_fake_quant()
+
     def extra_repr(self) -> str:
         return (
             f"dtype={self.dtype}, qscheme={self.qscheme}, "
