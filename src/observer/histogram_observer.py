@@ -31,9 +31,7 @@ class HistogramObserver(ObserverBase):
         self.upsample_rate = upsample_rate
         
         # 初始化直方图
-        self.register_buffer("histogram", None)
-        self.register_buffer("min_val", None)
-        self.register_buffer("max_val", None)
+        self.histogram = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

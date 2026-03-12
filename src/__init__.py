@@ -2,7 +2,9 @@
 AutoQuant - 专业的模型量化工具链条
 
 支持PTQ/QAT、混合精度量化、ONNX导出等功能
-参考MQBench框架设计
+
+Author: jihui
+Date: 2026-03-13
 """
 
 __version__ = "1.0.0"
@@ -15,7 +17,6 @@ from .core import (
     clamp_grad,
     fake_quantize_ste,
     lsq_quantize,
-    pact_quantize,
 )
 
 # 导出Observer
@@ -23,50 +24,38 @@ from .observer import (
     ObserverBase,
     MinMaxObserver,
     HistogramObserver,
-    MovingAverageMinMaxObserver,
-    PercentileObserver,
-    MSEObserver,
 )
 
 # 导出FakeQuant
 from .fake_quant import (
     FakeQuantizeBase,
-    FakeQuantize,
-    FixedFakeQuantize,
+    PTQFakeQuantize,
     LSQFakeQuantize,
-    PACTFakeQuantize,
 )
 
 # 导出量化工具
 from .quantization.model_quantizer import ModelQuantizer
+from .quantization.api import (
+    prepare,
+    prepare_qat,
+    convert,
+    calibrate,
+)
 from .onnx_export import (
     ONNXExporter,
-    InferenceEngine,
-    EngineConfig,
-    get_engine_config,
-    get_qconfig_for_engine,
-    get_supported_engines,
-    print_engine_info,
     ONNXOptimizer,
-    optimize_onnx,
-    simplify_with_onnxsim,
 )
 from .utils import (
     QConfig,
     get_default_qconfig,
-    get_per_channel_qconfig,
-    get_per_tensor_qconfig,
+    get_trt_qconfig,
+    get_ort_qconfig,
     get_lsq_qconfig,
-    get_pact_qconfig,
-    get_histogram_qconfig,
-    MixedPrecisionQuantizer,
-    LayerSelector,
     SensitivityAnalyzer,
 )
 
 from .evaluation import (
     QuantizationEvaluator,
-    compute_accuracy,
     compute_psnr,
     compute_ssim,
     compute_l1_error,
@@ -75,11 +64,6 @@ from .evaluation import (
 )
 
 from .special_models import (
-    TransformerQuantizer,
-    SmoothQuantQuantizer,
-    KVCacheQuantizer,
-    get_transformer_qconfig,
-    get_smoothquant_qconfig,
     NAFNet_flow,
     NAFNet_dgf_4c,
     NAFNet_dgf
@@ -93,58 +77,37 @@ __all__ = [
     "clamp_grad",
     "fake_quantize_ste",
     "lsq_quantize",
-    "pact_quantize",
     # Observer
     "ObserverBase",
     "MinMaxObserver",
     "HistogramObserver",
-    "MovingAverageMinMaxObserver",
-    "PercentileObserver",
-    "MSEObserver",
     # FakeQuant
     "FakeQuantizeBase",
-    "FakeQuantize",
-    "FixedFakeQuantize",
+    "PTQFakeQuantize",
     "LSQFakeQuantize",
-    "PACTFakeQuantize",
     # 工具
     "ModelQuantizer",
+    "prepare",
+    "prepare_qat",
+    "convert",
+    "calibrate",
     "ONNXExporter",
-    "InferenceEngine",
-    "EngineConfig",
-    "get_engine_config",
-    "get_qconfig_for_engine",
-    "get_supported_engines",
-    "print_engine_info",
     "ONNXOptimizer",
-    "optimize_onnx",
-    "simplify_with_onnxsim",
     "QConfig",
     "get_default_qconfig",
-    "get_per_channel_qconfig",
-    "get_per_tensor_qconfig",
+    "get_trt_qconfig",
+    "get_ort_qconfig",
     "get_lsq_qconfig",
-    "get_pact_qconfig",
-    "get_histogram_qconfig",
-    "MixedPrecisionQuantizer",
-    "LayerSelector",
     "SensitivityAnalyzer",
     # 评估
     "QuantizationEvaluator",
-    "compute_accuracy",
     "compute_psnr",
     "compute_ssim",
     "compute_l1_error",
     "compute_l2_error",
     "compute_cosine_similarity",
     # 特殊模型支持
-    "TransformerQuantizer",
-    "SmoothQuantQuantizer",
-    "KVCacheQuantizer",
-    "get_transformer_qconfig",
-    "get_smoothquant_qconfig",
     "NAFNet_flow",
     "NAFNet_dgf_4c",
     "NAFNet_dgf"
 ]
-

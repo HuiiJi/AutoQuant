@@ -58,16 +58,41 @@ class FakeQuantizeBase(nn.Module, ABC):
     def calculate_qparams(self):
         """从observer获取量化参数"""
         self.observer.calculate_qparams()
-        self.scale = self.observer.scale
-        self.zero_point = self.observer.zero_point
+        
+        # 如果 observer 没有统计数据，直接返回
+        if self.observer.scale is None or self.observer.zero_point is None:
+            return
+        
+        # 处理scale
+        if isinstance(self.observer.scale, torch.Tensor):
+            scale_value = self.observer.scale.clone()
+        else:
+            scale_value = torch.tensor(self.observer.scale)
+        
+        # 处理zero_point
+        if isinstance(self.observer.zero_point, torch.Tensor):
+            zero_point_value = self.observer.zero_point.clone()
+        else:
+            zero_point_value = torch.tensor(self.observer.zero_point)
+        
+        # 如果当前scale是nn.Parameter，保持其类型
+        if isinstance(self.scale, nn.Parameter):
+            self.scale.data = scale_value.data
+        else:
+            self.scale = scale_value
+        
+        # zero_point通常不是Parameter
+        self.zero_point = zero_point_value
 
     def disable_observer(self):
         """禁用observer统计"""
-        self.observer.eval()
+        if hasattr(self.observer, 'disable'):
+            self.observer.disable()
 
     def enable_observer(self):
         """启用observer统计"""
-        self.observer.train()
+        if hasattr(self.observer, 'enable'):
+            self.observer.enable()
 
     def disable_fake_quant(self):
         """禁用fake quant"""

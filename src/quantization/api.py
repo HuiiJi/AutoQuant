@@ -1,5 +1,8 @@
 """
-高级API函数 - 提供便捷的prepare和convert接口
+高级 API 函数 - 提供便捷的量化接口
+
+Author: jihui
+Date: 2026-03-13
 """
 import torch
 import torch.nn as nn
@@ -12,48 +15,83 @@ def prepare(
     model: nn.Module,
     qconfig: QConfig,
     inplace: bool = False,
-    leaf_modules: Optional[Set[str]] = None,
+    skip_layers: Optional[Set[str]] = None,
 ) -> nn.Module:
     """
-    准备模型用于PTQ
+    准备模型用于 PTQ
     
     Args:
         model: 待量化的模型
         qconfig: 量化配置
         inplace: 是否原地修改模型
-        leaf_modules: 需要量化的叶子节点名称集合（可选）
+        skip_layers: 跳过量化的层名称集合，如 {'layer1.0.conv1', 'fc'}
     
     Returns:
         准备好的量化模型
     """
     quantizer = ModelQuantizer(model, qconfig)
-    return quantizer.prepare(inplace=inplace, leaf_modules=leaf_modules)
+    return quantizer.prepare(inplace=inplace, skip_layers=skip_layers)
 
 
 def prepare_qat(
     model: nn.Module,
     qconfig: QConfig,
     inplace: bool = False,
-    leaf_modules: Optional[Set[str]] = None,
+    skip_layers: Optional[Set[str]] = None,
 ) -> nn.Module:
     """
-    准备模型用于QAT
+    准备模型用于 QAT
     
     Args:
         model: 待量化的模型
         qconfig: 量化配置
         inplace: 是否原地修改模型
-        leaf_modules: 需要量化的叶子节点名称集合（可选）
+        skip_layers: 跳过量化的层名称集合，如 {'layer1.0.conv1', 'fc'}
     
     Returns:
-        准备好的QAT模型
+        准备好的 QAT 模型
     """
-    # QAT的prepare和PTQ类似，都需要插入fake quant
     quantizer = ModelQuantizer(model, qconfig)
-    model_prepared = quantizer.prepare(inplace=inplace, leaf_modules=leaf_modules)
-    # 设置为训练模式
+    model_prepared = quantizer.prepare(inplace=inplace, skip_layers=skip_layers)
     model_prepared.train()
     return model_prepared
+
+
+def calibrate(
+    model: nn.Module,
+    calib_data,
+    device: Optional[torch.device] = None,
+):
+    """
+    校准模型（用于 PTQ）
+    
+    Args:
+        model: 准备好的量化模型
+        calib_data: 校准数据（DataLoader、list[Tensor] 或单个 Tensor）
+        device: 设备
+    """
+    if device is None:
+        device = next(model.parameters()).device
+    
+    model.eval()
+    with torch.no_grad():
+        if isinstance(calib_data, torch.utils.data.DataLoader):
+            for batch in calib_data:
+                if isinstance(batch, (list, tuple)):
+                    inputs = batch[0]
+                else:
+                    inputs = batch
+                inputs = inputs.to(device)
+                model(inputs)
+        elif isinstance(calib_data, list):
+            for inputs in calib_data:
+                inputs = inputs.to(device)
+                model(inputs)
+        elif isinstance(calib_data, torch.Tensor):
+            inputs = calib_data.to(device)
+            model(inputs)
+        else:
+            raise ValueError(f"不支持的校准数据类型: {type(calib_data)}")
 
 
 def convert(
@@ -63,42 +101,28 @@ def convert(
     """
     将准备好的模型转换为量化模型
     
+    注意：这个函数需要配合 ModelQuantizer 使用
+    
     Args:
-        model: 准备好的模型
-        inplace: 是否原地修改模型
+        model: 准备好的模型（必须来自 ModelQuantizer.prepare()）
+        inplace: 是否原地修改
     
     Returns:
         转换后的量化模型
     """
-    # 这里我们需要创建一个临时的quantizer来调用convert
-    # 实际项目中，可能需要更好的设计
-    dummy_qconfig = None  # 这里只是占位
-    quantizer = ModelQuantizer(model, dummy_qconfig)
-    return quantizer.convert(model, inplace=inplace)
-
-
-def calibrate(
-    model: nn.Module,
-    calib_data_loader,
-    device: Optional[torch.device] = None,
-):
-    """
-    校准模型（用于PTQ）
+    # 这里我们需要找到模型中的 QuantizableModule 并转换它们
+    # 简化实现：直接在模型上调用 convert 方法（如果有的话）
+    # 实际上，应该使用 ModelQuantizer.convert()
     
-    Args:
-        model: 准备好的量化模型
-        calib_data_loader: 校准数据加载器
-        device: 设备
-    """
-    if device is None:
-        device = next(model.parameters()).device
+    # 尝试递归转换所有模块
+    def _convert_recursive(m):
+        if hasattr(m, 'convert') and callable(m.convert):
+            return m.convert()
+        for name, child in m.named_children():
+            setattr(m, name, _convert_recursive(child))
+        return m
     
-    model.eval()
-    with torch.no_grad():
-        for batch in calib_data_loader:
-            if isinstance(batch, (list, tuple)):
-                inputs = batch[0]
-            else:
-                inputs = batch
-            inputs = inputs.to(device)
-            model(inputs)
+    if not inplace:
+        model = copy.deepcopy(model)
+    
+    return _convert_recursive(model)

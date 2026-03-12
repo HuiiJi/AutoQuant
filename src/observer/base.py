@@ -42,11 +42,14 @@ class ObserverBase(nn.Module, ABC):
         self.quant_min = quant_min
         self.quant_max = quant_max
         
-        # 初始化统计量
-        self.register_buffer("min_val", None)
-        self.register_buffer("max_val", None)
-        self.register_buffer("scale", None)
-        self.register_buffer("zero_point", None)
+        # 初始化统计量 - 不用 register_buffer，避免 None 的问题
+        self.min_val = None
+        self.max_val = None
+        self.scale = None
+        self.zero_point = None
+        
+        # 独立的统计开关，不依赖于 training/eval 模式
+        self.enabled = True
 
     @abstractmethod
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -74,10 +77,18 @@ class ObserverBase(nn.Module, ABC):
         self.max_val = None
         self.scale = None
         self.zero_point = None
+    
+    def enable(self):
+        """启用统计"""
+        self.enabled = True
+    
+    def disable(self):
+        """禁用统计"""
+        self.enabled = False
 
     def extra_repr(self) -> str:
         return (
             f"dtype={self.dtype}, qscheme={self.qscheme}, "
             f"quant_min={self.quant_min}, quant_max={self.quant_max}, "
-            f"ch_axis={self.ch_axis}"
+            f"ch_axis={self.ch_axis}, enabled={self.enabled}"
         )

@@ -21,13 +21,16 @@ class MinMaxObserver(ObserverBase):
         ch_axis: int = 0,
     ):
         super().__init__(dtype, qscheme, quant_min, quant_max, ch_axis)
-        self.register_buffer("min_val", None)
-        self.register_buffer("max_val", None)
+        self.min_val = None
+        self.max_val = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         前向传播，统计最小值和最大值
         """
+        if not self.enabled:
+            return x
+            
         if self.qscheme in [QScheme.PER_CHANNEL_AFFINE, QScheme.PER_CHANNEL_SYMMETRIC]:
             # 按通道统计
             dims = list(range(x.dim()))
@@ -53,7 +56,9 @@ class MinMaxObserver(ObserverBase):
         """
         计算量化参数scale和zero_point
         """
-        assert self.min_val is not None and self.max_val is not None, "需要先调用forward统计数据"
+        if self.min_val is None or self.max_val is None:
+            # 没有统计数据，直接返回 (None, None)
+            return None, None
 
         min_val = self.min_val
         max_val = self.max_val
