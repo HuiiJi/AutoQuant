@@ -1,6 +1,9 @@
 """
 HistogramObserver - 基于直方图的Observer
 支持更精确的量化参数计算
+
+Author: jihui
+Date: 2026-03-13
 """
 import torch
 import torch.nn as nn
@@ -37,6 +40,9 @@ class HistogramObserver(ObserverBase):
         """
         前向传播，收集直方图
         """
+        if not self.enabled:
+            return x
+            
         if self.qscheme in [QScheme.PER_CHANNEL_AFFINE, QScheme.PER_CHANNEL_SYMMETRIC]:
             # 按通道统计
             self._forward_per_channel(x)
@@ -54,23 +60,23 @@ class HistogramObserver(ObserverBase):
         current_max = torch.amax(x)
         
         # 更新全局的min和max
-        if self.min_val is None:
-            self.min_val = current_min
-            self.max_val = current_max
+        if self._min_val is None:
+            self._min_val = current_min
+            self._max_val = current_max
         else:
-            self.min_val = torch.min(self.min_val, current_min)
-            self.max_val = torch.max(self.max_val, current_max)
+            self._min_val = torch.min(self._min_val, current_min)
+            self._max_val = torch.max(self._max_val, current_max)
         
         # 计算直方图
         if self.histogram is None:
             self.histogram = torch.zeros(self.bins, device=x.device)
         
-        # 使用torch.histc计算直方图
+        # 使用torch.histc计算直方图，不调用item()避免GPU问题
         hist = torch.histc(
             x,
             bins=self.bins,
-            min=self.min_val.item(),
-            max=self.max_val.item()
+            min=self._min_val,
+            max=self._max_val
         )
         self.histogram += hist
 
@@ -91,8 +97,8 @@ class HistogramObserver(ObserverBase):
             self.histogram = torch.zeros(
                 num_channels, self.bins, device=x.device
             )
-            self.min_val = torch.zeros(num_channels, device=x.device)
-            self.max_val = torch.zeros(num_channels, device=x.device)
+            self._min_val = torch.zeros(num_channels, device=x.device)
+            self._max_val = torch.zeros(num_channels, device=x.device)
         
         # 对每个通道分别处理
         for i in range(num_channels):
@@ -102,19 +108,19 @@ class HistogramObserver(ObserverBase):
             current_max = torch.amax(channel_data)
             
             # 更新min和max
-            if self.min_val[i] == 0 and self.max_val[i] == 0:
-                self.min_val[i] = current_min
-                self.max_val[i] = current_max
+            if self.histogram[i].sum() == 0:
+                self._min_val[i] = current_min
+                self._max_val[i] = current_max
             else:
-                self.min_val[i] = torch.min(self.min_val[i], current_min)
-                self.max_val[i] = torch.max(self.max_val[i], current_max)
+                self._min_val[i] = torch.min(self._min_val[i], current_min)
+                self._max_val[i] = torch.max(self._max_val[i], current_max)
             
             # 计算直方图
             hist = torch.histc(
                 channel_data,
                 bins=self.bins,
-                min=self.min_val[i].item(),
-                max=self.max_val[i].item()
+                min=self._min_val[i],
+                max=self._max_val[i]
             )
             self.histogram[i] += hist
 
@@ -134,8 +140,8 @@ class HistogramObserver(ObserverBase):
         """
         按张量计算量化参数
         """
-        min_val = self.min_val
-        max_val = self.max_val
+        min_val = self._min_val
+        max_val = self._max_val
         
         # 对称量化调整
         if self.qscheme in [QScheme.PER_TENSOR_SYMMETRIC, QScheme.PER_CHANNEL_SYMMETRIC]:
@@ -145,8 +151,8 @@ class HistogramObserver(ObserverBase):
         
         # 计算scale和zero_point
         scale, zero_point = self._compute_qparams(min_val, max_val)
-        self.scale = scale
-        self.zero_point = zero_point
+        self._scale = scale
+        self._zero_point = zero_point
         return scale, zero_point
 
     def _calculate_qparams_per_channel(self) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -158,8 +164,8 @@ class HistogramObserver(ObserverBase):
         zero_points = []
         
         for i in range(num_channels):
-            min_val = self.min_val[i]
-            max_val = self.max_val[i]
+            min_val = self._min_val[i]
+            max_val = self._max_val[i]
             
             if self.qscheme in [QScheme.PER_TENSOR_SYMMETRIC, QScheme.PER_CHANNEL_SYMMETRIC]:
                 max_abs = torch.max(torch.abs(min_val), torch.abs(max_val))
@@ -170,9 +176,9 @@ class HistogramObserver(ObserverBase):
             scales.append(scale)
             zero_points.append(zero_point)
         
-        self.scale = torch.stack(scales)
-        self.zero_point = torch.stack(zero_points)
-        return self.scale, self.zero_point
+        self._scale = torch.stack(scales)
+        self._zero_point = torch.stack(zero_points)
+        return self._scale, self._zero_point
 
     def _compute_qparams(self, min_val: torch.Tensor, max_val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -201,7 +207,7 @@ class HistogramObserver(ObserverBase):
     def reset(self):
         """重置统计量"""
         self.histogram = None
-        self.min_val = None
-        self.max_val = None
-        self.scale = None
-        self.zero_point = None
+        self._min_val = None
+        self._max_val = None
+        self._scale = None
+        self._zero_point = None

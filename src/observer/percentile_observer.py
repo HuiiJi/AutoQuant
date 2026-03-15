@@ -1,6 +1,9 @@
 """
 PercentileObserver - 基于百分位数的Observer
 可以去除极端值的影响，获得更稳定的量化参数
+
+Author: jihui
+Date: 2026-03-13
 """
 import torch
 import torch.nn as nn
@@ -34,6 +37,9 @@ class PercentileObserver(ObserverBase):
         """
         前向传播，收集所有数据
         """
+        if not self.enabled:
+            return x
+            
         if self.qscheme in [QScheme.PER_CHANNEL_AFFINE, QScheme.PER_CHANNEL_SYMMETRIC]:
             self._forward_per_channel(x)
         else:
@@ -74,8 +80,8 @@ class PercentileObserver(ObserverBase):
             max_val = max_abs
         
         scale, zero_point = self._compute_qparams(min_val.to(self.all_values[0].device), max_val.to(self.all_values[0].device))
-        self.scale = scale
-        self.zero_point = zero_point
+        self._scale = scale
+        self._zero_point = zero_point
         return scale, zero_point
 
     def _calculate_qparams_per_channel(self) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -96,9 +102,9 @@ class PercentileObserver(ObserverBase):
             scales.append(scale)
             zero_points.append(zero_point)
         
-        self.scale = torch.stack(scales)
-        self.zero_point = torch.stack(zero_points)
-        return self.scale, self.zero_point
+        self._scale = torch.stack(scales)
+        self._zero_point = torch.stack(zero_points)
+        return self._scale, self._zero_point
 
     def _compute_qparams(self, min_val: torch.Tensor, max_val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         qmin = self.quant_min
@@ -123,5 +129,5 @@ class PercentileObserver(ObserverBase):
 
     def reset(self):
         self.all_values = []
-        self.scale = None
-        self.zero_point = None
+        self._scale = None
+        self._zero_point = None

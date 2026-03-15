@@ -11,7 +11,7 @@ from .model_quantizer import (
     QuantizableModule,
     QuantizableModelWrapper,
 )
-from .api import prepare, prepare_qat, calibrate
+from .api import prepare, prepare_qat, calibrate, convert, ptq
 
 __all__ = [
     "ModelQuantizer",
@@ -22,4 +22,6 @@ __all__ = [
     "prepare",
     "prepare_qat",
     "calibrate",
+    "convert",
+    "ptq",
 ]

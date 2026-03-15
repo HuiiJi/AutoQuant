@@ -42,20 +42,19 @@ class QuantizableModule(nn.Module):
     可量化模块包装器
     将 Conv/Linear 包装起来，添加 weight 和 activation 的量化
     
-    简化逻辑：
-    - weight 和 activation 都通过 fake quant
-    - 校准阶段：统计 + 量化（带噪声）
-    - 推理阶段：直接量化
+    关键原则：
+    - 校准阶段：只统计，不量化！
+    - 推理阶段：用 qparams 做 fake quant
     """
     def __init__(self, module: nn.Module, qconfig: QConfig):
         super().__init__()
         self.module = module
         self.weight_fake_quant = qconfig.weight()
         self.activation_fake_quant = qconfig.activation()
+        self._weight_stats_collected = False
 
     def forward(self, x):
         # 只有某些特定模块才量化 weight
-        # 不量化 weight 的模块：BatchNorm、LayerNorm、GroupNorm、InstanceNorm、PReLU 等
         should_quantize_weight = False
         module_type = type(self.module).__name__
         
@@ -71,16 +70,41 @@ class QuantizableModule(nn.Module):
             if module_type in weight_quant_modules:
                 should_quantize_weight = True
         
-        if should_quantize_weight:
-            quant_weight = self.weight_fake_quant(self.module.weight)
-            original_weight = self.module.weight
-            self.module.weight = nn.Parameter(quant_weight)
-            output = self.module(x)
-            self.module.weight = original_weight
-        else:
+        # ==========================================
+        # 判断是否在校准阶段
+        # ==========================================
+        is_calibration = False
+        if hasattr(self.activation_fake_quant, 'observer') and self.activation_fake_quant.observer:
+            is_calibration = self.activation_fake_quant.observer.enabled
+        
+        # ==========================================
+        # 阶段 1：校准阶段 - 只统计，不量化！
+        # ==========================================
+        if is_calibration:
+            if should_quantize_weight and not self._weight_stats_collected:
+                # Weight 只统计一次！（第1个样本时统计）
+                self.weight_fake_quant(self.module.weight)
+                self._weight_stats_collected = True
+            
+            # 用原始 weight 计算 Conv/Linear！
             output = self.module(x)
         
-        # 所有模块都量化 activation
+        # ==========================================
+        # 阶段 2：推理阶段 - 用 qparams 量化
+        # ==========================================
+        else:
+            if should_quantize_weight:
+                # 用 fake quant 后的 weight 计算
+                quant_weight = self.weight_fake_quant(self.module.weight)
+                original_weight = self.module.weight
+                self.module.weight = nn.Parameter(quant_weight)
+                output = self.module(x)
+                self.module.weight = original_weight
+            else:
+                output = self.module(x)
+        
+        # 所有阶段都经过 activation quant
+        # 校准阶段会只统计，推理阶段会量化
         output = self.activation_fake_quant(output)
         return output
     
@@ -156,7 +180,7 @@ class ModelQuantizer:
     
     正确 PTQ 流程：
     ┌─────────────────────────────────────────────────────────────┐
-    │  PREPARE  →  CALIBRATE (统计+量化噪声)  →  CONVERT  →  ONNX │
+    │  PREPARE  →  CALIBRATE (只统计!)  →  CONVERT  →  ONNX      │
     └─────────────────────────────────────────────────────────────┘
     """
 

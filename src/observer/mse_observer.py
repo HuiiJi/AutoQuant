@@ -1,6 +1,9 @@
 """
 MSEObserver - 基于最小化量化误差的Observer
 通过搜索找到最小化MSE的量化参数
+
+Author: jihui
+Date: 2026-03-13
 """
 import torch
 import torch.nn as nn
@@ -29,6 +32,9 @@ class MSEObserver(ObserverBase):
         self.all_values = []
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not self.enabled:
+            return x
+            
         if self.qscheme in [QScheme.PER_CHANNEL_AFFINE, QScheme.PER_CHANNEL_SYMMETRIC]:
             self._forward_per_channel(x)
         else:
@@ -67,9 +73,9 @@ class MSEObserver(ObserverBase):
             all_data, min_val, max_val
         )
         
-        self.scale = best_scale.to(self.all_values[0].device)
-        self.zero_point = best_zero_point.to(self.all_values[0].device)
-        return self.scale, self.zero_point
+        self._scale = best_scale.to(self.all_values[0].device)
+        self._zero_point = best_zero_point.to(self.all_values[0].device)
+        return self._scale, self._zero_point
 
     def _calculate_qparams_per_channel(self) -> Tuple[torch.Tensor, torch.Tensor]:
         scales = []
@@ -86,9 +92,9 @@ class MSEObserver(ObserverBase):
             scales.append(best_scale.to(channel_values[0].device))
             zero_points.append(best_zero_point.to(channel_values[0].device))
         
-        self.scale = torch.stack(scales)
-        self.zero_point = torch.stack(zero_points)
-        return self.scale, self.zero_point
+        self._scale = torch.stack(scales)
+        self._zero_point = torch.stack(zero_points)
+        return self._scale, self._zero_point
 
     def _search_best_qparams(self, data: torch.Tensor, min_val: torch.Tensor, max_val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         qmin = self.quant_min
@@ -156,5 +162,5 @@ class MSEObserver(ObserverBase):
 
     def reset(self):
         self.all_values = []
-        self.scale = None
-        self.zero_point = None
+        self._scale = None
+        self._zero_point = None

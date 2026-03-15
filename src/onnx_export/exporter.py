@@ -1,5 +1,12 @@
 """
 ONNX导出模块 - 支持符号化追踪和QDQ节点导出
+
+Author: jihui
+Date: 2026-03-13
+Desc:
+    - 使用 torch.fake_quantize_per_tensor_affine/channel
+    - PyTorch 会自动导出标准 QuantizeLinear/DequantizeLinear 节点
+    - 不需要手动转换！
 """
 import torch
 import torch.nn as nn
@@ -51,6 +58,10 @@ class SymbolicTracer:
 class ONNXExporter:
     """
     ONNX导出器 - 导出包含QDQ节点的ONNX模型
+    
+    关键设计：
+    - 使用 torch.fake_quantize_per_tensor_affine/channel 会自动导出 QDQ 节点
+    - PyTorch ONNX 导出器自动处理，不需要手动转换
     """
 
     @staticmethod
@@ -64,9 +75,13 @@ class ONNXExporter:
         verbose: bool = False,
         optimize: bool = True,
         optimization_passes: Optional[List[str]] = None,
+        input_names: Optional[List[str]] = None,
+        output_names: Optional[List[str]] = None,
+        dynamic_axes: Optional[Dict[str, Dict[int, str]]] = None,
     ):
         model.eval()
         
+        # 检查是否是量化模型
         is_quantized_model = False
         for name, module in model.named_modules():
             if 'FakeQuantize' in type(module).__name__ or 'Quantizable' in type(module).__name__:
@@ -78,6 +93,20 @@ class ONNXExporter:
             model = tracer.trace(model, dummy_input)
             model = tracer.optimize_graph(model)
         
+        # 默认输入输出名称
+        if input_names is None:
+            input_names = ['input']
+        if output_names is None:
+            output_names = ['output']
+        
+        # 默认 dynamic axes
+        if dynamic_axes is None:
+            dynamic_axes = {
+                'input': {0: 'batch_size'},
+                'output': {0: 'batch_size'}
+            }
+        
+        # 导出 ONNX - 使用旧版导出器以支持 fake_quantize
         torch.onnx.export(
             model,
             dummy_input,
@@ -85,147 +114,58 @@ class ONNXExporter:
             verbose=verbose,
             opset_version=opset_version,
             do_constant_folding=do_constant_folding,
-            input_names=['input'],
-            output_names=['output'],
-            dynamic_axes={
-                'input': {0: 'batch_size'},
-                'output': {0: 'batch_size'}
-            }
+            input_names=input_names,
+            output_names=output_names,
+            dynamic_axes=dynamic_axes,
+            export_params=True,
+            keep_initializers_as_inputs=False,
+            # 使用旧版导出器以避免 torch.export 的问题
+            dynamo=False,
+            fallback=True,
         )
         
-        print(f"模型已成功导出到: {output_path}")
+        print(f"✅ 模型已成功导出到: {output_path}")
         
+        # 验证 ONNX
         ONNXExporter.validate_onnx(output_path)
         
+        # 优化 ONNX
         if optimize:
-            from autoquant.onnx_export.onnx_optimizer import optimize_onnx
-            print("\n开始优化ONNX模型...")
-            optimized_model = optimize_onnx(output_path, output_path, passes=optimization_passes, verbose=verbose)
-            print("ONNX模型优化完成！")
+            try:
+                from autoquant.onnx_export.onnx_optimizer import optimize_onnx
+                print("\n🔧 开始优化 ONNX 模型...")
+                optimized_model = optimize_onnx(output_path, output_path, passes=optimization_passes, verbose=verbose)
+                print("✅ ONNX 模型优化完成！")
+            except Exception as e:
+                print(f"⚠️  ONNX 优化跳过: {e}")
         
+        # 检查是否有 QDQ 节点
         if is_quantized_model:
-            print("\n开始将模型转换为QDQ节点...")
-            ONNXExporter.convert_to_qdq(output_path)
-            print("QDQ节点转换完成！")
+            has_qdq = ONNXExporter.has_qdq_nodes(output_path)
+            if has_qdq:
+                print("\n✅ 检测到标准 QDQ 节点！")
+            else:
+                print("\n⚠️  未检测到 QDQ 节点！请确保使用 PTQFakeQuantize！")
 
     @staticmethod
     def validate_onnx(onnx_path: str):
         model_onnx = onnx.load(onnx_path)
         onnx.checker.check_model(model_onnx)
-        print("ONNX模型验证通过！")
-        print(f"ONNX版本: {model_onnx.opset_import[0].version}")
-        print(f"图输入: {[input.name for input in model_onnx.graph.input]}")
-        print(f"图输出: {[output.name for output in model_onnx.graph.output]}")
-        print(f"节点数量: {len(model_onnx.graph.node)}")
+        print("✅ ONNX 模型验证通过！")
+        print(f"   ONNX 版本: {model_onnx.opset_import[0].version}")
+        print(f"   图输入: {[input.name for input in model_onnx.graph.input]}")
+        print(f"   图输出: {[output.name for output in model_onnx.graph.output]}")
+        print(f"   节点数量: {len(model_onnx.graph.node)}")
 
     @staticmethod
     def has_qdq_nodes(onnx_path: str) -> bool:
         model_onnx = onnx.load(onnx_path)
         qdq_ops = {'QuantizeLinear', 'DequantizeLinear'}
+        qdq_count = 0
         for node in model_onnx.graph.node:
             if node.op_type in qdq_ops:
-                return True
+                qdq_count += 1
+        if qdq_count > 0:
+            print(f"   QDQ 节点数量: {qdq_count}")
+            return True
         return False
-    
-    @staticmethod
-    def convert_to_qdq(onnx_path: str, output_path: str = None):
-        """
-        将ONNX模型中的div、round、clip操作链转换为QDQ节点
-        """
-        if output_path is None:
-            output_path = onnx_path
-        
-        model_onnx = onnx.load(onnx_path)
-        
-        new_graph = onnx.helper.make_graph(
-            [],
-            model_onnx.graph.name,
-            model_onnx.graph.input,
-            model_onnx.graph.output,
-            list(model_onnx.graph.initializer)
-        )
-        
-        zero_point_tensor = onnx.helper.make_tensor(
-            name="zero_point_constant",
-            data_type=onnx.TensorProto.INT8,
-            dims=[],
-            vals=[0]
-        )
-        new_graph.initializer.append(zero_point_tensor)
-        
-        i = 0
-        qdq_pairs_created = 0
-        nodes_skipped = 0
-        
-        # 收集所有初始化器名称
-        init_names = {init.name for init in model_onnx.graph.initializer}
-        
-        while i < len(model_onnx.graph.node):
-            node = model_onnx.graph.node[i]
-            
-            if node.op_type == 'Div' and len(node.input) == 2:
-                scale_input = node.input[1]
-                is_scale_constant = scale_input in init_names
-                
-                if is_scale_constant:
-                    found_chain = False
-                    chain_nodes = [node]
-                    next_output = node.output[0]
-                    
-                    # 查找操作链：Div -> Add -> Round -> Clip -> Sub -> Mul
-                    chain_ops = []
-                    current_idx = i
-                    
-                    for op_type in ['Add', 'Round', 'Clip', 'Sub', 'Mul']:
-                        found = False
-                        for j in range(current_idx + 1, min(current_idx + 5, len(model_onnx.graph.node))):
-                            current_node = model_onnx.graph.node[j]
-                            if next_output in current_node.input and current_node.op_type == op_type:
-                                chain_nodes.append(current_node)
-                                chain_ops.append(op_type)
-                                next_output = current_node.output[0]
-                                current_idx = j
-                                found = True
-                                break
-                        if not found:
-                            break
-                    
-                    # 如果找到完整的操作链
-                    if len(chain_ops) == 5 and chain_ops == ['Add', 'Round', 'Clip', 'Sub', 'Mul']:
-                        mul_node = chain_nodes[-1]
-                        
-                        # 创建QDQ节点
-                        quant_node = onnx.helper.make_node(
-                            'QuantizeLinear',
-                            inputs=[node.input[0], scale_input, "zero_point_constant"],
-                            outputs=[f"quantized_{qdq_pairs_created}"],
-                            name=f"QuantizeLinear_{qdq_pairs_created}"
-                        )
-                        
-                        dequant_node = onnx.helper.make_node(
-                            'DequantizeLinear',
-                            inputs=[f"quantized_{qdq_pairs_created}", scale_input, "zero_point_constant"],
-                            outputs=mul_node.output,
-                            name=f"DequantizeLinear_{qdq_pairs_created}"
-                        )
-                        
-                        new_graph.node.append(quant_node)
-                        new_graph.node.append(dequant_node)
-                        
-                        qdq_pairs_created += 1
-                        nodes_skipped += len(chain_nodes)
-                        i = current_idx + 1
-                        continue
-            
-            new_graph.node.append(node)
-            i += 1
-        
-        new_model = onnx.helper.make_model(new_graph, producer_name="AutoQuant")
-        
-        for opset in model_onnx.opset_import:
-            new_model.opset_import.append(opset)
-        
-        onnx.save(new_model, output_path)
-        print(f"已将模型转换为包含QDQ节点的版本，保存到: {output_path}")
-        print(f"  创建了 {qdq_pairs_created} 对QDQ节点")
-        print(f"  替换了 {nodes_skipped} 个原始节点")

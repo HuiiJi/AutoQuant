@@ -1,5 +1,8 @@
 """
 MinMaxObserver - 基于最小最大值的Observer
+
+Author: jihui
+Date: 2026-03-13
 """
 import torch
 from typing import Tuple
@@ -21,8 +24,6 @@ class MinMaxObserver(ObserverBase):
         ch_axis: int = 0,
     ):
         super().__init__(dtype, qscheme, quant_min, quant_max, ch_axis)
-        self.min_val = None
-        self.max_val = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -43,12 +44,12 @@ class MinMaxObserver(ObserverBase):
             max_val = torch.amax(x)
 
         # 更新统计量
-        if self.min_val is None:
-            self.min_val = min_val.detach()
-            self.max_val = max_val.detach()
+        if self._min_val is None:
+            self._min_val = min_val.detach()
+            self._max_val = max_val.detach()
         else:
-            self.min_val = torch.min(self.min_val, min_val.detach())
-            self.max_val = torch.max(self.max_val, max_val.detach())
+            self._min_val = torch.min(self._min_val, min_val.detach())
+            self._max_val = torch.max(self._max_val, max_val.detach())
 
         return x
 
@@ -56,12 +57,12 @@ class MinMaxObserver(ObserverBase):
         """
         计算量化参数scale和zero_point
         """
-        if self.min_val is None or self.max_val is None:
+        if self._min_val is None or self._max_val is None:
             # 没有统计数据，直接返回 (None, None)
             return None, None
 
-        min_val = self.min_val
-        max_val = self.max_val
+        min_val = self._min_val
+        max_val = self._max_val
 
         # 对称量化调整
         if self.qscheme in [QScheme.PER_TENSOR_SYMMETRIC, QScheme.PER_CHANNEL_SYMMETRIC]:
@@ -74,8 +75,8 @@ class MinMaxObserver(ObserverBase):
 
         # 计算scale和zero_point
         scale, zero_point = self._compute_qparams(min_val, max_val)
-        self.scale = scale
-        self.zero_point = zero_point
+        self._scale = scale
+        self._zero_point = zero_point
         return scale, zero_point
 
     def _compute_qparams(self, min_val: torch.Tensor, max_val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -113,7 +114,7 @@ class MinMaxObserver(ObserverBase):
 
     def reset(self):
         """重置统计量"""
-        self.min_val = None
-        self.max_val = None
-        self.scale = None
-        self.zero_point = None
+        self._min_val = None
+        self._max_val = None
+        self._scale = None
+        self._zero_point = None

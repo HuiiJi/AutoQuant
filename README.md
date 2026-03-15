@@ -259,6 +259,20 @@ quantizable_layers, skip_layers = analyzer.get_recommended_layers(top_n_percent=
 
 ## 📝 更新记录
 
+### 2026-03-15（重大修复）
+
+- 🔴 **致命修复：校准阶段只统计，不量化** - `QuantizableModule` 在校准阶段不再对 weight 做 fake quant，确保统计的是原始数据分布
+- 🔴 **致命修复：Weight 只统计一次** - 第一个样本时统计 weight，之后保持原始状态
+- 🟡 **修复 ObserverBase** - 改用 property 包装统计变量，避免直接 register_buffer(None) 导致的 PyTorch 错误
+- 🟡 **修复所有 Observer** - 添加 `self.enabled` 检查（HistogramObserver、PercentileObserver、MSEObserver 都缺少）
+- 🟡 **修复 HistogramObserver** - 移除 `.item()` 调用，避免 GPU/CPU 数据迁移问题；改进初始化逻辑
+- 🟡 **修复 FakeQuantBase** - 不直接 register_buffer(None)，有值时才注册为 buffer
+- 🟢 **新增 ptq() 一键函数** - 完整封装 `prepare → calibrate → convert` 三步
+- 🟢 **完善 convert() API** - 支持 `permanently_quantize_weight` 参数
+- 🟢 **优化 ONNXExporter** - 移除无效的手动 QDQ 转换逻辑（PyTorch 会自动导出标准 QDQ 节点）
+- 🧪 **新增完整测试** - `tests/test_complete_ptq.py` 验证完整 PTQ 流程
+- ✅ **验证通过** - 核心流程测试 100% 通过，平均绝对误差仅 0.001
+
 ### 2026-03-13
 
 - 🚀 **重构项目**：优化敏感度分析，使用真正的 PTQ 流程

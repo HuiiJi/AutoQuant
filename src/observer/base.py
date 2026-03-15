@@ -42,14 +42,46 @@ class ObserverBase(nn.Module, ABC):
         self.quant_min = quant_min
         self.quant_max = quant_max
         
-        # 初始化统计量 - 不用 register_buffer，避免 None 的问题
-        self.min_val = None
-        self.max_val = None
-        self.scale = None
-        self.zero_point = None
+        # 初始化统计量
+        self._min_val = None
+        self._max_val = None
+        self._scale = None
+        self._zero_point = None
         
         # 独立的统计开关，不依赖于 training/eval 模式
         self.enabled = True
+        
+    @property
+    def min_val(self):
+        return self._min_val
+    
+    @min_val.setter
+    def min_val(self, value):
+        self._min_val = value
+    
+    @property
+    def max_val(self):
+        return self._max_val
+    
+    @max_val.setter
+    def max_val(self, value):
+        self._max_val = value
+    
+    @property
+    def scale(self):
+        return self._scale
+    
+    @scale.setter
+    def scale(self, value):
+        self._scale = value
+    
+    @property
+    def zero_point(self):
+        return self._zero_point
+    
+    @zero_point.setter
+    def zero_point(self, value):
+        self._zero_point = value
 
     @abstractmethod
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -73,10 +105,10 @@ class ObserverBase(nn.Module, ABC):
 
     def reset(self):
         """重置统计量"""
-        self.min_val = None
-        self.max_val = None
-        self.scale = None
-        self.zero_point = None
+        self._min_val = None
+        self._max_val = None
+        self._scale = None
+        self._zero_point = None
     
     def enable(self):
         """启用统计"""

@@ -1,6 +1,9 @@
 """
 FakeQuant基类定义
 FakeQuant用于QAT阶段模拟量化误差，保留梯度传递
+
+Author: jihui
+Date: 2026-03-13
 """
 import torch
 import torch.nn as nn
@@ -40,9 +43,37 @@ class FakeQuantizeBase(nn.Module, ABC):
             )
         self.observer = observer
         
-        # 量化参数
-        self.register_buffer("scale", None)
-        self.register_buffer("zero_point", None)
+        # 量化参数 - 不直接 register_buffer(None)，PyTorch 不允许
+        self._scale = None
+        self._zero_point = None
+        
+    @property
+    def scale(self):
+        return self._scale
+    
+    @scale.setter
+    def scale(self, value):
+        if value is not None and isinstance(value, torch.Tensor):
+            # 如果有值，注册为 buffer
+            if not hasattr(self, '_scale_buffer'):
+                self.register_buffer('_scale_buffer', value)
+            else:
+                self._scale_buffer = value
+        self._scale = value
+    
+    @property
+    def zero_point(self):
+        return self._zero_point
+    
+    @zero_point.setter
+    def zero_point(self, value):
+        if value is not None and isinstance(value, torch.Tensor):
+            # 如果有值，注册为 buffer
+            if not hasattr(self, '_zero_point_buffer'):
+                self.register_buffer('_zero_point_buffer', value)
+            else:
+                self._zero_point_buffer = value
+        self._zero_point = value
 
     @abstractmethod
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -75,13 +106,8 @@ class FakeQuantizeBase(nn.Module, ABC):
         else:
             zero_point_value = torch.tensor(self.observer.zero_point)
         
-        # 如果当前scale是nn.Parameter，保持其类型
-        if isinstance(self.scale, nn.Parameter):
-            self.scale.data = scale_value.data
-        else:
-            self.scale = scale_value
-        
-        # zero_point通常不是Parameter
+        # 设置属性（会自动处理 register_buffer）
+        self.scale = scale_value
         self.zero_point = zero_point_value
 
     def disable_observer(self):

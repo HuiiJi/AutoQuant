@@ -1,6 +1,9 @@
 """
 MovingAverageMinMaxObserver - 滑动平均的MinMaxObserver
 适用于在线学习或QAT
+
+Author: jihui
+Date: 2026-03-13
 """
 import torch
 import torch.nn as nn
@@ -26,13 +29,14 @@ class MovingAverageMinMaxObserver(ObserverBase):
     ):
         super().__init__(dtype, qscheme, quant_min, quant_max, ch_axis)
         self.momentum = momentum
-        self.register_buffer("min_val", None)
-        self.register_buffer("max_val", None)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         前向传播，使用滑动平均更新min和max
         """
+        if not self.enabled:
+            return x
+            
         if self.qscheme in [QScheme.PER_CHANNEL_AFFINE, QScheme.PER_CHANNEL_SYMMETRIC]:
             dims = list(range(x.dim()))
             dims.pop(self.ch_axis)
@@ -42,21 +46,21 @@ class MovingAverageMinMaxObserver(ObserverBase):
             current_min = torch.amin(x)
             current_max = torch.amax(x)
         
-        if self.min_val is None:
-            self.min_val = current_min.detach()
-            self.max_val = current_max.detach()
+        if self._min_val is None:
+            self._min_val = current_min.detach()
+            self._max_val = current_max.detach()
         else:
             # 滑动平均更新
-            self.min_val = (1 - self.momentum) * self.min_val + self.momentum * current_min.detach()
-            self.max_val = (1 - self.momentum) * self.max_val + self.momentum * current_max.detach()
+            self._min_val = (1 - self.momentum) * self._min_val + self.momentum * current_min.detach()
+            self._max_val = (1 - self.momentum) * self._max_val + self.momentum * current_max.detach()
         
         return x
 
     def calculate_qparams(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        assert self.min_val is not None and self.max_val is not None
+        assert self._min_val is not None and self._max_val is not None
         
-        min_val = self.min_val
-        max_val = self.max_val
+        min_val = self._min_val
+        max_val = self._max_val
         
         if self.qscheme in [QScheme.PER_TENSOR_SYMMETRIC, QScheme.PER_CHANNEL_SYMMETRIC]:
             max_abs = torch.max(torch.abs(min_val), torch.abs(max_val))
@@ -64,8 +68,8 @@ class MovingAverageMinMaxObserver(ObserverBase):
             max_val = max_abs
         
         scale, zero_point = self._compute_qparams(min_val, max_val)
-        self.scale = scale
-        self.zero_point = zero_point
+        self._scale = scale
+        self._zero_point = zero_point
         return scale, zero_point
 
     def _compute_qparams(self, min_val: torch.Tensor, max_val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -90,7 +94,7 @@ class MovingAverageMinMaxObserver(ObserverBase):
         return scale, zero_point
 
     def reset(self):
-        self.min_val = None
-        self.max_val = None
-        self.scale = None
-        self.zero_point = None
+        self._min_val = None
+        self._max_val = None
+        self._scale = None
+        self._zero_point = None
