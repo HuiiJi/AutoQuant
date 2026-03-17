@@ -40,6 +40,7 @@ from .quantization.api import (
     prepare_qat,
     convert,
     calibrate,
+    ptq,
 )
 from .onnx_export import (
     ONNXExporter,
@@ -69,7 +70,7 @@ from .evaluation import (
     compute_cosine_similarity,
 )
 
-from .special_models import (
+from .models import (
     NAFNet_flow,
     NAFNet_dgf_4c,
     NAFNet_dgf
@@ -97,6 +98,7 @@ __all__ = [
     "prepare_qat",
     "convert",
     "calibrate",
+    "ptq",
     "ONNXExporter",
     "ONNXOptimizer",
     "InferenceEngine",

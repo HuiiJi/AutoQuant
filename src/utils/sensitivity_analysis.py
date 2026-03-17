@@ -905,7 +905,7 @@ class SensitivityAnalyzer:
                 top_n_percent=use_top_n_percent if use_top_n_percent else 10.0
             )
             if saved_plots:
-                for path in saved_plots:
+                for path in saved_plots:    
                     print(f"    图表已保存: {os.path.basename(path)}")
         except Exception as e:
             print(f"    图表生成跳过: {str(e)[:80]}")
