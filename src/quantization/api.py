@@ -20,13 +20,13 @@ def prepare(
 ) -> nn.Module:
     """
     准备模型用于 PTQ
-    
+
     Args:
         model: 待量化的模型
         qconfig: 量化配置
         inplace: 是否原地修改模型
         skip_layers: 跳过量化的层名称集合，如 {'layer1.0.conv1', 'fc'}
-    
+
     Returns:
         准备好的量化模型
     """
@@ -42,13 +42,13 @@ def prepare_qat(
 ) -> nn.Module:
     """
     准备模型用于 QAT
-    
+
     Args:
         model: 待量化的模型
         qconfig: 量化配置
         inplace: 是否原地修改模型
         skip_layers: 跳过量化的层名称集合，如 {'layer1.0.conv1', 'fc'}
-    
+
     Returns:
         准备好的 QAT 模型
     """
@@ -66,7 +66,7 @@ def calibrate(
 ):
     """
     校准模型（用于 PTQ）
-    
+
     Args:
         model: 准备好的量化模型
         calib_data: 校准数据（DataLoader、list[Tensor] 或单个 Tensor）
@@ -75,7 +75,7 @@ def calibrate(
     """
     if device is None:
         device = next(model.parameters()).device
-    
+
     model.eval()
     with torch.no_grad():
         if isinstance(calib_data, torch.utils.data.DataLoader):
@@ -110,12 +110,12 @@ def convert(
 ) -> nn.Module:
     """
     将准备好的模型转换为量化模型
-    
+
     Args:
         model: 准备好的模型
         inplace: 是否原地修改
         permanently_quantize_weight: 是否永久量化 weight（默认False）
-    
+
     Returns:
         转换后的量化模型
     """
@@ -126,10 +126,10 @@ def convert(
         for name, child in m.named_children():
             setattr(m, name, _convert_recursive(child))
         return m
-    
+
     if not inplace:
         model = copy.deepcopy(model)
-    
+
     return _convert_recursive(model)
 
 
@@ -145,7 +145,7 @@ def ptq(
 ) -> nn.Module:
     """
     完整的 PTQ 流程：prepare → calibrate → convert
-    
+
     Args:
         model: 待量化的模型
         qconfig: 量化配置
@@ -155,7 +155,7 @@ def ptq(
         skip_layers: 跳过量化的层
         permanently_quantize_weight: 是否永久量化 weight
         verbose: 是否打印日志
-    
+
     Returns:
         量化后的模型
     """
@@ -163,18 +163,18 @@ def ptq(
         print("=" * 60)
         print("🚀 开始 PTQ 量化流程")
         print("=" * 60)
-    
+
     # 1. Prepare
     if verbose:
         print("\n[1/3] 准备模型...")
     quantizer = ModelQuantizer(model, qconfig)
     prepared_model = quantizer.prepare(inplace=inplace, skip_layers=skip_layers)
-    
+
     # 2. Calibrate
     if verbose:
         print("\n[2/3] 校准模型...")
     quantizer.calibrate(calib_data, device=device, verbose=verbose)
-    
+
     # 3. Convert
     if verbose:
         print("\n[3/3] 转换为推理模式...")
@@ -182,10 +182,10 @@ def ptq(
         inplace=True,
         permanently_quantize_weight=permanently_quantize_weight
     )
-    
+
     if verbose:
         print("\n" + "=" * 60)
         print("✅ PTQ 量化完成！")
         print("=" * 60)
-    
+
     return quantized_model

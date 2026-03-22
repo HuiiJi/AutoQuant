@@ -4,26 +4,6 @@ PTQ FakeQuantize - 后训练量化专用
 
 Author: jihui
 Date: 2026-03-13
-Desc:
-    正确的 PTQ 流程：
-    ┌─────────────────────────────────────────────────────────┐
-    │  阶段 1: CALIBRATION（校准）                               │
-    │  - observer.enabled = True                                 │
-    │  - 只统计 min/max，不计算 qparams，不做 fake quant！       │
-    │  - 这样确保统计的是原始数据分布，不是量化后的数据！         │
-    └─────────────────────────────────────────────────────────┘
-                            ↓
-    ┌─────────────────────────────────────────────────────────┐
-    │  阶段 2: CONVERT（转换）                                  │
-    │  - 调用 calculate_qparams() 计算 scale/zp                │
-    │  - observer.enabled = False                                │
-    └─────────────────────────────────────────────────────────┘
-                            ↓
-    ┌─────────────────────────────────────────────────────────┐
-    │  阶段 3: INFERENCE（推理）                                │
-    │  - 用计算好的 qparams 做 fake quant                       │
-    │  - observer 保持禁用                                       │
-    └─────────────────────────────────────────────────────────┘
 """
 import torch
 import torch.nn as nn
@@ -36,10 +16,6 @@ from autoquant.observer import ObserverBase
 class PTQFakeQuantize(FakeQuantizeBase):
     """
     PTQFakeQuantize：后训练量化专用
-    
-    关键设计原则：
-    1. 校准阶段（observer.enabled=True）：只统计，不量化！
-    2. 推理阶段（observer.enabled=False）：用统计好的 qparams 量化
     """
 
     def __init__(
@@ -72,47 +48,61 @@ class PTQFakeQuantize(FakeQuantizeBase):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         前向传播
-        
-        ⚠️  注意两个不同的 enabled 属性：
-        1. self.enabled: FakeQuantize 的总开关（禁用后完全不量化，直接返回 x）
-        2. self.observer.enabled: 只控制 observer 是否统计数据
-        
-        关键逻辑：
-        - 如果 observer.enabled=True（校准阶段）：只统计，不量化
-        - 如果 observer.enabled=False（推理阶段）：用统计好的 qparams 进行 fake quant
         """
-        # 第一重检查：FakeQuantize 总开关（几乎不用，保留为备用）
-        if not self.enabled:
-            return x
-
-        # ==========================================
-        # 阶段 1: 校准阶段 - 只统计，不量化！
-        # ==========================================
-        if self.observer and self.observer.enabled:
-            # 只统计数据，不做任何量化！
-            self.observer(x)
-            # 直接返回原始 x，确保后面层统计的是原始数据！
-            return x
-
-        # ==========================================
-        # 阶段 2: 推理阶段 - 使用 qparams 做 fake quant
-        # ==========================================
-        # 如果还没有 qparams，直接返回
-        if self.scale is None or self.zero_point is None:
-            return x
-
+        # 获取 qmin/qmax
         qmin = self.observer.quant_min if self.observer else self.quant_min
         qmax = self.observer.quant_max if self.observer else self.quant_max
-        scale = self.scale
-        zero_point = self.zero_point
 
+        # ==========================================
+        # 核心逻辑修改：支持校准态临时量化
+        # ==========================================
+
+        # 1. 如果已经固化了参数 (Convert 之后)，直接用固化参数
+        if self.scale is not None and self.zero_point is not None:
+            # if self.observer and self.observer.enabled:
+            #     self.observer(x)
+            scale = self.scale
+            zero_point = self.zero_point
+
+        # 2. 如果还没固化参数 (Prepare/Calibration 阶段)，但 Observer 开着
+        elif self.observer and self.observer.enabled:
+            # A. 先让 Observer 统计当前数据 (更新 min/max 或直方图)
+            self.observer(x)
+
+            # B. 【关键】从 Observer 获取“临时”的 qparams
+            # 注意：这里需要你的 Observer 支持随时计算当前状态的 qparams
+            # 即使还没有调用最终的 calculate_qparams，Observer 内部应该有当前的 min_val/max_val
+            temp_scale, temp_zero_point = self.observer.calculate_qparams()
+
+            # 如果 Observer 还没统计出有效值 (比如第一步)，则无法量化，直接返回
+            if temp_scale is None:
+                return x
+
+            scale = temp_scale
+            zero_point = temp_zero_point
+
+        # ==========================================
+        # 确保 scale 和 zero_point 没有梯度 (detach)
+        # ==========================================
+        if isinstance(scale, torch.Tensor):
+            scale = scale.detach()
+        if isinstance(zero_point, torch.Tensor):
+            zero_point = zero_point.detach()
+
+        # ==========================================
+        # 执行 Fake Quantize (统一出口)
+        # ==========================================
         if self.qscheme in [QScheme.PER_CHANNEL_AFFINE, QScheme.PER_CHANNEL_SYMMETRIC]:
+            # 确保 zero_point 类型正确，ONNX 导出通常需要 int32
             if zero_point.dtype not in [torch.int32, torch.float32]:
                 zero_point = zero_point.to(torch.int32)
+
+            # 注意：per_channel 的 scale 和 zero_point 需要是 1D Tensor
             return torch.fake_quantize_per_channel_affine(
                 x, scale=scale, zero_point=zero_point, axis=self.ch_axis, quant_min=qmin, quant_max=qmax
             )
         else:
+            # per_tensor 的 scale 和 zero_point 通常是标量 (0D Tensor)
             return torch.fake_quantize_per_tensor_affine(
                 x, scale=scale, zero_point=zero_point, quant_min=qmin, quant_max=qmax
             )

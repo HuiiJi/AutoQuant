@@ -187,7 +187,7 @@ class PACTQuantize(Function):
         # 将 0 转换为与 x 同类型的张量
         zero = torch.tensor(0, dtype=x.dtype, device=x.device)
         x_clamped = torch.clamp(x, zero, alpha)
-        
+
         # 量化
         x_int = torch.round(x_clamped / scale + zero_point)
         x_int = torch.clamp(x_int, quant_min, quant_max)

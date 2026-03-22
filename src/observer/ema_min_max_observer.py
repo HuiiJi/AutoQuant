@@ -36,7 +36,7 @@ class MovingAverageMinMaxObserver(ObserverBase):
         """
         if not self.enabled:
             return x
-            
+
         if self.qscheme in [QScheme.PER_CHANNEL_AFFINE, QScheme.PER_CHANNEL_SYMMETRIC]:
             dims = list(range(x.dim()))
             dims.pop(self.ch_axis)
@@ -45,7 +45,7 @@ class MovingAverageMinMaxObserver(ObserverBase):
         else:
             current_min = torch.amin(x)
             current_max = torch.amax(x)
-        
+
         if self._min_val is None:
             self._min_val = current_min.detach()
             self._max_val = current_max.detach()
@@ -53,20 +53,20 @@ class MovingAverageMinMaxObserver(ObserverBase):
             # 滑动平均更新
             self._min_val = (1 - self.momentum) * self._min_val + self.momentum * current_min.detach()
             self._max_val = (1 - self.momentum) * self._max_val + self.momentum * current_max.detach()
-        
+
         return x
 
     def calculate_qparams(self) -> Tuple[torch.Tensor, torch.Tensor]:
         assert self._min_val is not None and self._max_val is not None
-        
+
         min_val = self._min_val
         max_val = self._max_val
-        
+
         if self.qscheme in [QScheme.PER_TENSOR_SYMMETRIC, QScheme.PER_CHANNEL_SYMMETRIC]:
             max_abs = torch.max(torch.abs(min_val), torch.abs(max_val))
             min_val = -max_abs
             max_val = max_abs
-        
+
         scale, zero_point = self._compute_qparams(min_val, max_val)
         self._scale = scale
         self._zero_point = zero_point
@@ -75,22 +75,22 @@ class MovingAverageMinMaxObserver(ObserverBase):
     def _compute_qparams(self, min_val: torch.Tensor, max_val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         qmin = self.quant_min
         qmax = self.quant_max
-        
+
         max_val = torch.max(max_val, min_val + 1e-8)
-        
+
         scale = (max_val - min_val) / float(qmax - qmin)
         initial_zero_point = qmin - min_val / scale
         zero_point = torch.round(initial_zero_point)
         zero_point = torch.clamp(zero_point, qmin, qmax)
-        
+
         if self.qscheme in [QScheme.PER_TENSOR_SYMMETRIC, QScheme.PER_CHANNEL_SYMMETRIC]:
             zero_point = torch.zeros_like(zero_point)
-        
+
         if self.dtype == QuantDtype.QUINT8:
             zero_point = zero_point.to(torch.uint8)
         elif self.dtype == QuantDtype.QINT8:
             zero_point = zero_point.to(torch.int8)
-        
+
         return scale, zero_point
 
     def reset(self):

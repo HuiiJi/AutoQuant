@@ -107,18 +107,18 @@ except Exception as e:
 print("\n7. 测试核心函数...")
 try:
     import torch
-    
+
     # 测试round_ste
     x = torch.tensor([1.3, 1.6, 2.1])
     y = round_ste(x)
     print(f"   ✓ round_ste 正常工作")
-    
+
     # 测试LSQ
     if torch.cuda.is_available():
         print("   ✓ CUDA 可用")
     else:
         print("   ⚠ CUDA 不可用，将使用CPU")
-    
+
     print("   ✓ 核心函数测试通过")
 except Exception as e:
     print(f"   ✗ 核心函数测试失败: {e}")

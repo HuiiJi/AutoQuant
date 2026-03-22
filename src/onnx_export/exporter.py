@@ -27,12 +27,12 @@ class SymbolicTracer:
         concrete_args: Optional[Dict[str, Any]] = None,
     ) -> GraphModule:
         model.eval()
-        
+
         if concrete_args is None:
             traced_model = symbolic_trace(model)
         else:
             traced_model = symbolic_trace(model, concrete_args=concrete_args)
-        
+
         return traced_model
 
     @staticmethod
@@ -41,15 +41,15 @@ class SymbolicTracer:
         traced_model = SymbolicTracer._eliminate_dead_code(traced_model)
         traced_model = SymbolicTracer._fuse_operations(traced_model)
         return traced_model
-    
+
     @staticmethod
     def _fold_constants(model: GraphModule) -> GraphModule:
         return model
-    
+
     @staticmethod
     def _eliminate_dead_code(model: GraphModule) -> GraphModule:
         return model
-    
+
     @staticmethod
     def _fuse_operations(model: GraphModule) -> GraphModule:
         return model
@@ -58,7 +58,7 @@ class SymbolicTracer:
 class ONNXExporter:
     """
     ONNX导出器 - 导出包含QDQ节点的ONNX模型
-    
+
     关键设计：
     - 使用 torch.fake_quantize_per_tensor_affine/channel 会自动导出 QDQ 节点
     - PyTorch ONNX 导出器自动处理，不需要手动转换
@@ -80,32 +80,32 @@ class ONNXExporter:
         dynamic_axes: Optional[Dict[str, Dict[int, str]]] = None,
     ):
         model.eval()
-        
+
         # 检查是否是量化模型
         is_quantized_model = False
         for name, module in model.named_modules():
             if 'FakeQuantize' in type(module).__name__ or 'Quantizable' in type(module).__name__:
                 is_quantized_model = True
                 break
-        
+
         if not is_quantized_model and use_symbolic_trace:
             tracer = SymbolicTracer()
             model = tracer.trace(model, dummy_input)
             model = tracer.optimize_graph(model)
-        
+
         # 默认输入输出名称
         if input_names is None:
             input_names = ['input']
         if output_names is None:
             output_names = ['output']
-        
+
         # 默认 dynamic axes
         if dynamic_axes is None:
             dynamic_axes = {
                 'input': {0: 'batch_size'},
                 'output': {0: 'batch_size'}
             }
-        
+
         # 导出 ONNX - 使用旧版导出器以支持 fake_quantize
         torch.onnx.export(
             model,
@@ -123,12 +123,12 @@ class ONNXExporter:
             dynamo=False,
             fallback=True,
         )
-        
+
         print(f"✅ 模型已成功导出到: {output_path}")
-        
+
         # 验证 ONNX
         ONNXExporter.validate_onnx(output_path)
-        
+
         # 优化 ONNX
         if optimize:
             try:
@@ -138,7 +138,7 @@ class ONNXExporter:
                 print("✅ ONNX 模型优化完成！")
             except Exception as e:
                 print(f"⚠️  ONNX 优化跳过: {e}")
-        
+
         # 检查是否有 QDQ 节点
         if is_quantized_model:
             has_qdq = ONNXExporter.has_qdq_nodes(output_path)

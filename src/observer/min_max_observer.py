@@ -31,7 +31,7 @@ class MinMaxObserver(ObserverBase):
         """
         if not self.enabled:
             return x
-            
+
         if self.qscheme in [QScheme.PER_CHANNEL_AFFINE, QScheme.PER_CHANNEL_SYMMETRIC]:
             # 按通道统计
             dims = list(range(x.dim()))

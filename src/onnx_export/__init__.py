@@ -9,10 +9,10 @@ from .onnx_optimizer import ONNXOptimizer
 from .engine_adapter import (
     InferenceEngine,
     EngineConfig,
+    print_engine_info,
     get_engine_config,
     get_qconfig_for_engine,
     get_supported_engines,
-    print_engine_info,
 )
 
 __all__ = [

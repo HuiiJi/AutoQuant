@@ -4,7 +4,7 @@ QConfig配置系统 - 定义量化配置
 
 Author: jihui
 Date: 2026-03-13
-Desc: 
+Desc:
     - get_trt_qconfig(): TensorRT 最佳精度方案
     - get_ort_qconfig(): ONNX Runtime 最佳精度方案
     - get_default_qconfig(): 默认使用 TRT 方案
@@ -37,17 +37,17 @@ class QConfig:
 
     def __repr__(self) -> str:
         return f"QConfig(activation={getattr(self.activation, '__name__', self.activation)}, " \
-               f"weight={getattr(self.weight, '__name__', self.weight)})"
+            f"weight={getattr(self.weight, '__name__', self.weight)})"
 
 
 def get_trt_qconfig() -> QConfig:
     """
     获取 TensorRT 最佳精度的量化配置
-    
+
     TensorRT 最佳实践：
     - Activation: PER_TENSOR_SYMMETRIC + MinMaxObserver
     - Weight: PER_CHANNEL_SYMMETRIC + MinMaxObserver
-    
+
     Returns:
         QConfig对象
     """
@@ -74,27 +74,27 @@ def get_trt_qconfig() -> QConfig:
 def get_ort_qconfig() -> QConfig:
     """
     获取 ONNX Runtime 最佳精度的量化配置
-    
+
     ONNX Runtime 最佳实践：
-    - Activation: PER_TENSOR_AFFINE + HistogramObserver (更好的精度)
-    - Weight: PER_CHANNEL_AFFINE + MinMaxObserver
-    
+    - Activation: PER_TENSOR_SYMMETRIC + MovingAverageMinMaxObserver
+    - Weight: PER_CHANNEL_SYMMETRIC + HistogramObserver (ONNX Runtime QLinearConv 要求对称)
+
     Returns:
         QConfig对象
     """
-    # Activation: PER_TENSOR_AFFINE + HistogramObserver
+    # Activation: PER_TENSOR_SYMMETRIC + MovingAverageMinMaxObserver
     def activation_fq():
-        observer = HistogramObserver(
+        observer = MovingAverageMinMaxObserver(
             dtype=QuantDtype.QUINT8,
-            qscheme=QScheme.PER_TENSOR_AFFINE,
+            qscheme=QScheme.PER_TENSOR_SYMMETRIC,
         )
         return PTQFakeQuantize(observer=observer)
 
-    # Weight: PER_CHANNEL_AFFINE + MinMaxObserver
+    # Weight: PER_CHANNEL_SYMMETRIC + HistogramObserver
     def weight_fq():
-        observer = MinMaxObserver(
+        observer = HistogramObserver(
             dtype=QuantDtype.QINT8,
-            qscheme=QScheme.PER_CHANNEL_AFFINE,
+            qscheme=QScheme.PER_CHANNEL_SYMMETRIC,
             ch_axis=0,
         )
         return PTQFakeQuantize(observer=observer)
@@ -112,7 +112,7 @@ def get_default_qconfig(
 ) -> QConfig:
     """
     获取默认的量化配置（参数化配置）
-    
+
     Args:
         activation_dtype: 激活值量化数据类型
         weight_dtype: 权重量化数据类型
@@ -120,7 +120,7 @@ def get_default_qconfig(
         weight_qscheme: 权重量化方案
         activation_observer_type: 激活值observer类型 - "minmax", "histogram", 或 "moving_avg"
         weight_observer_type: 权重observer类型
-    
+
     Returns:
         QConfig对象
     """
@@ -130,17 +130,17 @@ def get_default_qconfig(
             "histogram": HistogramObserver,
             "moving_average": MovingAverageMinMaxObserver,
         }.get(observer_type.lower(), HistogramObserver)
-    
+
     ActivationObserverClass = get_observer_class(activation_observer_type)
     WeightObserverClass = get_observer_class(weight_observer_type)
-    
+
     def activation_fq():
         observer = ActivationObserverClass(
             dtype=activation_dtype,
             qscheme=activation_qscheme,
         )
         return PTQFakeQuantize(observer=observer)
-    
+
     def weight_fq():
         observer = WeightObserverClass(
             dtype=weight_dtype,
@@ -148,7 +148,7 @@ def get_default_qconfig(
             ch_axis=0,
         )
         return PTQFakeQuantize(observer=observer)
-    
+
     return QConfig(activation=activation_fq, weight=weight_fq)
 
 
@@ -160,13 +160,13 @@ def get_lsq_qconfig(
 ) -> QConfig:
     """
     获取 LSQ（Learned Step Size Quantization）配置（QAT 专用）
-    
+
     Args:
         activation_dtype: 激活值的量化数据类型
         weight_dtype: 权重的量化数据类型
         activation_qscheme: 激活值的量化方案
         weight_qscheme: 权重的量化方案
-    
+
     Returns:
         QConfig对象
     """

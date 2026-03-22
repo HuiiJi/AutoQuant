@@ -35,11 +35,11 @@ class ONNXOptimizer:
     ) -> onnx.ModelProto:
         """
         执行优化
-        
+
         Args:
             passes: 要执行的优化pass列表，默认执行所有pass
             verbose: 是否打印优化信息
-        
+
         Returns:
             优化后的ONNX模型
         """
@@ -47,7 +47,7 @@ class ONNXOptimizer:
             passes = self._get_default_passes()
 
         optimized_model = self.model
-        
+
         if verbose:
             print(f"初始模型大小: {len(optimized_model.SerializeToString()) / 1024:.2f} KB")
 
@@ -145,16 +145,16 @@ class ONNXOptimizer:
                                             if node.output[0] == next_node.input[0]:
                                                 # 找到了Q-D-Q-D模式
                                                 # 检查是否可以合并
-                                                if (len(prev_node.input) >= 3 and 
-                                                    len(next_node.input) >= 3):
+                                                if (len(prev_node.input) >= 3 and
+                                                        len(next_node.input) >= 3):
                                                     # 比较scale和zero_point
                                                     scale1 = self._get_initializer_value(graph, prev_node.input[1])
                                                     zp1 = self._get_initializer_value(graph, prev_node.input[2])
                                                     scale2 = self._get_initializer_value(graph, next_node.input[1])
                                                     zp2 = self._get_initializer_value(graph, next_node.input[2])
-                                                    
+
                                                     if (scale1 is not None and scale2 is not None and
-                                                        zp1 is not None and zp2 is not None):
+                                                            zp1 is not None and zp2 is not None):
                                                         if np.allclose(scale1, scale2) and np.allclose(zp1, zp2):
                                                             # scale和zp相同，可以合并
                                                             nodes_to_remove.extend([j, i, k])
@@ -176,7 +176,7 @@ class ONNXOptimizer:
     def _simplify_qdq_patterns(self, model: onnx.ModelProto) -> onnx.ModelProto:
         """简化QDQ模式"""
         graph = model.graph
-        
+
         # 检查并修复一些常见的QDQ模式问题
         for node in graph.node:
             if node.op_type in ["QuantizeLinear", "DequantizeLinear"]:
@@ -188,7 +188,7 @@ class ONNXOptimizer:
                     # 对于激活：通常是axis=1（通道维度）
                     # 但需要根据输入形状来判断
                     axis = 1  # 默认值
-                    
+
                     # 尝试根据输入形状判断
                     for input_name in node.input:
                         for value_info in graph.input:
@@ -205,10 +205,10 @@ class ONNXOptimizer:
                                     # 4D初始化器，通常是权重
                                     axis = 0
                                 break
-                    
+
                     axis_attr = helper.make_attribute("axis", axis)
                     node.attribute.append(axis_attr)
-        
+
         return model
 
     def _optimize_layernorm(self, model: onnx.ModelProto) -> onnx.ModelProto:
@@ -217,24 +217,24 @@ class ONNXOptimizer:
         new_nodes = []
         nodes_to_remove = []
         input_replacements = {}
-        
+
         # 查找 permute -> layer_norm -> permute 模式
         i = 0
         while i < len(graph.node):
             node = graph.node[i]
-            
+
             # 检查是否是第一个permute
             if node.op_type == "Transpose" and i + 2 < len(graph.node):
                 next_node = graph.node[i + 1]
                 next_next_node = graph.node[i + 2]
-                
+
                 # 检查是否是 layer_norm
                 if next_node.op_type == "LayerNormalization" and next_next_node.op_type == "Transpose":
                     # 检查permute的顺序是否匹配
                     # 对于LayerNorm2d: permute(0, 2, 3, 1) -> layer_norm -> permute(0, 3, 1, 2)
                     permute1_order = None
                     permute2_order = None
-                    
+
                     for attr in node.attribute:
                         if attr.name == "perm":
                             # 检查 attr.ints 的类型
@@ -244,7 +244,7 @@ class ONNXOptimizer:
                                     permute1_order = [dim.i for dim in attr.ints]
                                 except AttributeError:
                                     permute1_order = list(attr.ints)
-                    
+
                     for attr in next_next_node.attribute:
                         if attr.name == "perm":
                             # 检查 attr.ints 的类型
@@ -254,7 +254,7 @@ class ONNXOptimizer:
                                     permute2_order = [dim.i for dim in attr.ints]
                                 except AttributeError:
                                     permute2_order = list(attr.ints)
-                    
+
                     if permute1_order == [0, 2, 3, 1] and permute2_order == [0, 3, 1, 2]:
                         # 找到匹配的模式，创建一个新的LayerNormalization节点，直接在正确的维度上操作
                         new_layernorm = helper.make_node(
@@ -263,38 +263,38 @@ class ONNXOptimizer:
                             outputs=[next_next_node.output[0]],
                             name=f"optimized_layernorm_{i}"
                         )
-                        
+
                         # 复制LayerNormalization的属性
                         for attr in next_node.attribute:
                             if attr.name != "axis":
                                 new_layernorm.attribute.append(attr)
-                        
+
                         # 设置axis为1（通道维度）
                         axis_attr = helper.make_attribute("axis", 1)
                         new_layernorm.attribute.append(axis_attr)
-                        
+
                         # 添加新节点
                         new_nodes.append(new_layernorm)
-                        
+
                         # 标记要删除的节点
-                        nodes_to_remove.extend([i, i+1, i+2])
-                        
+                        nodes_to_remove.extend([i, i + 1, i + 2])
+
                         # 跳过已处理的节点
                         i += 3
                         continue
-            
+
             # 如果不是匹配的模式，添加到新节点列表
             if i not in nodes_to_remove:
                 new_nodes.append(node)
             i += 1
-        
+
         # 替换节点
         if nodes_to_remove:
             del graph.node[:]
             graph.node.extend(new_nodes)
-        
+
         return model
-    
+
     def _cleanup_unused_nodes(self, model: onnx.ModelProto) -> onnx.ModelProto:
         """清理未使用的节点和initializer"""
         try:
@@ -339,24 +339,24 @@ def optimize_onnx(
 ) -> onnx.ModelProto:
     """
     便捷函数：优化ONNX模型
-    
+
     Args:
         input_path: 输入模型路径
         output_path: 输出模型路径（可选）
         passes: 优化pass列表
         verbose: 是否打印信息
-    
+
     Returns:
         优化后的ONNX模型
     """
     optimizer = ONNXOptimizer(model_path=input_path)
     optimized_model = optimizer.optimize(passes=passes, verbose=verbose)
-    
+
     if output_path:
         onnx.save(optimized_model, output_path)
         if verbose:
             print(f"优化后的模型已保存到: {output_path}")
-    
+
     return optimized_model
 
 
@@ -367,12 +367,12 @@ def simplify_with_onnxsim(
 ) -> onnx.ModelProto:
     """
     使用onnxsim进行完整简化
-    
+
     Args:
         input_path: 输入模型路径
         output_path: 输出模型路径
         **kwargs: 传递给onnxsim.simplify的参数
-    
+
     Returns:
         简化后的ONNX模型
     """
@@ -380,15 +380,15 @@ def simplify_with_onnxsim(
         from onnxsim import simplify
     except ImportError:
         raise ImportError("请先安装onnxsim: pip install onnxsim")
-    
+
     model = onnx.load(input_path)
     simplified_model, check = simplify(model, **kwargs)
-    
+
     if not check:
         print("警告: 模型检查失败，但仍返回简化后的模型")
-    
+
     if output_path:
         onnx.save(simplified_model, output_path)
         print(f"简化后的模型已保存到: {output_path}")
-    
+
     return simplified_model

@@ -19,7 +19,7 @@ class LSQFakeQuantize(FakeQuantizeBase):
     LSQ (Learned Step Size Quantization)
     论文：https://arxiv.org/abs/1902.08153
     scale 作为可学习参数，用于 QAT 训练
-    
+
     特点：
     - scale 是 nn.Parameter，通过反向传播学习
     - 使用自定义 autograd function 实现 STE（Straight-Through Estimator）

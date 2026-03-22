@@ -14,7 +14,7 @@ class ObserverBase(nn.Module, ABC):
 
     def __init__(
         self,
-        dtype: QuantDtype = QuantDtype.QUINT8,
+        dtype: QuantDtype = QuantDtype.QINT8,
         qscheme: QScheme = QScheme.PER_TENSOR_AFFINE,
         quant_min: Optional[int] = None,
         quant_max: Optional[int] = None,
@@ -26,7 +26,7 @@ class ObserverBase(nn.Module, ABC):
         self.ch_axis = ch_axis
         self.torch_dtype = dtype.to_torch_dtype()
         self.torch_qscheme = qscheme.to_torch_qscheme()
-        
+
         # 设置量化范围
         if quant_min is None:
             if dtype == QuantDtype.QUINT8:
@@ -38,47 +38,45 @@ class ObserverBase(nn.Module, ABC):
                 quant_max = 255
             elif dtype == QuantDtype.QINT8:
                 quant_max = 127
-        
+
         self.quant_min = quant_min
         self.quant_max = quant_max
-        
+
         # 初始化统计量
         self._min_val = None
         self._max_val = None
         self._scale = None
         self._zero_point = None
-        
-        # 独立的统计开关，不依赖于 training/eval 模式
         self.enabled = True
-        
+
     @property
     def min_val(self):
         return self._min_val
-    
+
     @min_val.setter
     def min_val(self, value):
         self._min_val = value
-    
+
     @property
     def max_val(self):
         return self._max_val
-    
+
     @max_val.setter
     def max_val(self, value):
         self._max_val = value
-    
+
     @property
     def scale(self):
         return self._scale
-    
+
     @scale.setter
     def scale(self, value):
         self._scale = value
-    
+
     @property
     def zero_point(self):
         return self._zero_point
-    
+
     @zero_point.setter
     def zero_point(self, value):
         self._zero_point = value
@@ -109,11 +107,11 @@ class ObserverBase(nn.Module, ABC):
         self._max_val = None
         self._scale = None
         self._zero_point = None
-    
+
     def enable(self):
         """启用统计"""
         self.enabled = True
-    
+
     def disable(self):
         """禁用统计"""
         self.enabled = False

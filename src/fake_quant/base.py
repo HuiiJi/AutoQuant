@@ -31,26 +31,14 @@ class FakeQuantizeBase(nn.Module, ABC):
         self.qscheme = qscheme
         self.ch_axis = ch_axis
         self.enabled = enabled
-        
-        # 如果没有提供observer，使用默认的MinMaxObserver
-        if observer is None:
-            observer = MinMaxObserver(
-                dtype=dtype,
-                qscheme=qscheme,
-                quant_min=quant_min,
-                quant_max=quant_max,
-                ch_axis=ch_axis,
-            )
         self.observer = observer
-        
-        # 量化参数 - 不直接 register_buffer(None)，PyTorch 不允许
         self._scale = None
         self._zero_point = None
-        
+
     @property
     def scale(self):
         return self._scale
-    
+
     @scale.setter
     def scale(self, value):
         if value is not None and isinstance(value, torch.Tensor):
@@ -60,11 +48,11 @@ class FakeQuantizeBase(nn.Module, ABC):
             else:
                 self._scale_buffer = value
         self._scale = value
-    
+
     @property
     def zero_point(self):
         return self._zero_point
-    
+
     @zero_point.setter
     def zero_point(self, value):
         if value is not None and isinstance(value, torch.Tensor):
@@ -89,24 +77,23 @@ class FakeQuantizeBase(nn.Module, ABC):
     def calculate_qparams(self):
         """从observer获取量化参数"""
         self.observer.calculate_qparams()
-        
+
         # 如果 observer 没有统计数据，直接返回
         if self.observer.scale is None or self.observer.zero_point is None:
             return
-        
+
         # 处理scale
         if isinstance(self.observer.scale, torch.Tensor):
-            scale_value = self.observer.scale.clone()
+            scale_value = self.observer.scale.clone().detach()
         else:
-            scale_value = torch.tensor(self.observer.scale)
-        
+            scale_value = torch.tensor(self.observer.scale).detach()
+
         # 处理zero_point
         if isinstance(self.observer.zero_point, torch.Tensor):
-            zero_point_value = self.observer.zero_point.clone()
+            zero_point_value = self.observer.zero_point.clone().detach()
         else:
-            zero_point_value = torch.tensor(self.observer.zero_point)
-        
-        # 设置属性（会自动处理 register_buffer）
+            zero_point_value = torch.tensor(self.observer.zero_point).detach()
+
         self.scale = scale_value
         self.zero_point = zero_point_value
 
@@ -127,14 +114,6 @@ class FakeQuantizeBase(nn.Module, ABC):
     def enable_fake_quant(self):
         """启用fake quant"""
         self.enabled = True
-
-    def disable(self):
-        """禁用fake quant（别名）"""
-        self.disable_fake_quant()
-
-    def enable(self):
-        """启用fake quant（别名）"""
-        self.enable_fake_quant()
 
     def extra_repr(self) -> str:
         return (

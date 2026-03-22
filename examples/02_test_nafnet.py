@@ -1,3 +1,5 @@
+import torch.nn.functional as F
+from autoquant import NAFNet_dgf, get_default_qconfig, get_ort_qconfig, get_trt_qconfig, ModelQuantizer, ptq, ONNXExporter, SensitivityAnalyzer, QuantDtype, QScheme, get_qconfig_for_engine
 import os
 import glob
 import cv2
@@ -15,20 +17,19 @@ project_root = os.path.dirname(current_dir)
 src_dir = os.path.join(project_root, 'src')
 sys.path.insert(0, src_dir)
 
-from autoquant import NAFNet_dgf, get_default_qconfig, get_ort_qconfig, get_trt_qconfig, ModelQuantizer, ptq, ONNXExporter, SensitivityAnalyzer, QuantDtype, QScheme, get_qconfig_for_engine
-import torch.nn.functional as F
 
 class instanceSegInferenceV2:
-    def __init__(self, onnx_model_path=r"C:\Users\75241\Documents\xwechat_files\wxid_7qorwm7awnqp22_977e\msg\file\2026-03\instance_0806.onnx"):
+    def __init__(
+            self, onnx_model_path=r"C:\Users\75241\Documents\xwechat_files\wxid_7qorwm7awnqp22_977e\msg\file\2026-03\instance_0806.onnx"):
         self.nc = 1
-        self.nmsth = 0.6 # 0.45
+        self.nmsth = 0.6  # 0.45
         self.onnx_model_path = onnx_model_path
         self.c = 32
         self.new_shape = [640, 640]
         self.m_shape = [160, 160]
-        self.scoreth = 0.45 # 0.25
+        self.scoreth = 0.45  # 0.25
         self.maskth = 0.5
-        
+
         # 加载模型
         self.load_model()
 
@@ -45,18 +46,18 @@ class instanceSegInferenceV2:
         y[..., 3] = x[..., 3]  # bottom right y
 
         return y
-    
-    def custom_round(self, num, lt=False):  
+
+    def custom_round(self, num, lt=False):
         if lt:
             return math.floor(num)
         else:
-            return math.ceil(num) 
+            return math.ceil(num)
 
     def mask_area(self, mask):
         """计算 mask 的面积."""
         _, binary_mask = cv2.threshold(mask, self.maskth, 1, cv2.THRESH_BINARY)
         return np.count_nonzero(binary_mask)
-    
+
     def mask_iou(self, mask1, mask2, flag='mask'):
         if flag == 'mask':
             _, binary_mask1 = cv2.threshold(mask1, self.maskth, 1, cv2.THRESH_BINARY)
@@ -80,7 +81,7 @@ class instanceSegInferenceV2:
 
         return iou
 
-    def mask_nms(self, img, box, masks, protos,  scores, scoreth, nmsth, mask_weight=0.7, bbox_weight=0.3):
+    def mask_nms(self, img, box, masks, protos, scores, scoreth, nmsth, mask_weight=0.7, bbox_weight=0.3):
         """基于 mask 面积的非最大抑制（NMS）."""
         # 使用得分阈值过滤掉低于阈值的检测框
         inds = np.array(np.where(scores > scoreth)[0], dtype=int)
@@ -91,17 +92,17 @@ class instanceSegInferenceV2:
         masks = _masks.reshape(-1, self.m_shape[0], self.m_shape[1])
         boxmask = np.zeros_like(masks)
         box = box[inds]
-        scale = self.m_shape[0]/self.new_shape[0]
+        scale = self.m_shape[0] / self.new_shape[0]
         for i, b in enumerate(box):
             b[2] = b[0] + b[2]
             b[3] = b[1] + b[3]
-            xmin, ymin, xmax, ymax = int(b[0]*scale), int(b[1]*scale), round(b[2]*scale), round(b[3]*scale)
+            xmin, ymin, xmax, ymax = int(b[0] * scale), int(b[1] * scale), round(b[2] * scale), round(b[3] * scale)
             # xmin, ymin, xmax, ymax = b.astype(int)
             boxmask[i, ymin:ymax, xmin:xmax] = 1
         masks = boxmask * masks
         scores = scores[inds]
-        # 对分数进行排序（降序）  
-        sorted_indices = scores.argsort()[::-1]  
+        # 对分数进行排序（降序）
+        sorted_indices = scores.argsort()[::-1]
         sorted_bboxes = box[sorted_indices]
         sorted_masks = masks[sorted_indices]
         sorted_scores = scores[sorted_indices]
@@ -115,19 +116,21 @@ class instanceSegInferenceV2:
             idx = sorted_indices[0]
             max_idx = inds[idx]
             keep.append(max_idx)
-            bbox_ious = np.array([self.mask_iou(sorted_bboxes[0], sorted_bboxes[i], flag='bbox') for i in range(1, len(sorted_indices))])
-            mask_ious = np.array([self.mask_iou(sorted_masks[0], sorted_masks[i], flag='mask') for i in range(1, len(sorted_indices))])
-            
+            bbox_ious = np.array([self.mask_iou(sorted_bboxes[0], sorted_bboxes[i], flag='bbox')
+                                 for i in range(1, len(sorted_indices))])
+            mask_ious = np.array([self.mask_iou(sorted_masks[0], sorted_masks[i], flag='mask')
+                                 for i in range(1, len(sorted_indices))])
+
             # 标准 NMS：删除与当前高分掩码重叠大于 nmsth 的低分掩码
             # keep_indices = np.where((mask_ious <= nmsth) & (bbox_ious <= nmsth))[0]
             combined_iou = mask_weight * mask_ious + bbox_weight * bbox_ious
             keep_indices = np.where(combined_iou <= nmsth)[0]
 
             # 更新 sorted_indices 和 sorted_boxes
-            sorted_indices = sorted_indices[keep_indices+1]  # 加1是因为从1开始计算IoU
-            sorted_masks = sorted_masks[keep_indices+1]
-            sorted_bboxes = sorted_bboxes[keep_indices+1]
-            sorted_scores = sorted_scores[keep_indices+1]
+            sorted_indices = sorted_indices[keep_indices + 1]  # 加1是因为从1开始计算IoU
+            sorted_masks = sorted_masks[keep_indices + 1]
+            sorted_bboxes = sorted_bboxes[keep_indices + 1]
+            sorted_scores = sorted_scores[keep_indices + 1]
             i += 1
 
         return np.array(keep)
@@ -146,7 +149,7 @@ class instanceSegInferenceV2:
         tp, bp = int(round(dh - 0.1)), int(round(dh + 0.1))
         lp, rp = int(round(dw - 0.1)), int(round(dw + 0.1))
         img = cv2.copyMakeBorder(img, tp, bp, lp, rp, cv2.BORDER_CONSTANT,
-                                value=(114, 114, 114))
+                                 value=(114, 114, 114))
         vis_img = img.copy()
         img = img.transpose((2, 0, 1))[::-1]
         im = img / 255.
@@ -189,7 +192,11 @@ class instanceSegInferenceV2:
         boxmask = np.zeros_like(mask)
         for i, b in enumerate(dbox):
             xmin, ymin, xmax, ymax = b
-            xmin, ymin, xmax, ymax = max(0, int(xmin)), max(0, int(ymin)), min(round(xmax), self.new_shape[0]), min(round(ymax), self.new_shape[0])
+            xmin, ymin, xmax, ymax = max(
+                0, int(xmin)), max(
+                0, int(ymin)), min(
+                round(xmax), self.new_shape[0]), min(
+                round(ymax), self.new_shape[0])
             boxmask[i, ymin:ymax, xmin:xmax] = 1
 
         mask = boxmask * mask
@@ -199,7 +206,7 @@ class instanceSegInferenceV2:
         # Apply Gaussian blur to smooth the mask
         mask = cv2.GaussianBlur(mask, (5, 5), 0)
         # +++++++++++++++++++++++++++++++++++++++
-        
+
         mask = cv2.resize(mask, self.new_shape, interpolation=cv2.INTER_LANCZOS4)
 
         mask[mask >= self.maskth] = 1
@@ -221,7 +228,6 @@ class instanceSegInferenceV2:
         box[:, :2] = box[:, :2].astype(int)
         box[:, 2:] = np.round(box[:, 2:])
         return box, score, mask
-
 
 
 def load_im(img_path: str) -> np.ndarray:
@@ -248,7 +254,7 @@ def load_im(img_path: str) -> np.ndarray:
 
         img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
-    except:
+    except BaseException:
         img = cv2.imread(img_path)
     return img
 
@@ -282,6 +288,7 @@ def save_from_array(
         os.makedirs(os.path.dirname(output_dir))
 
     img.save(output_dir, quality=100)
+
 
 def resize_with_padding(image, target_size):
     height, width = image.shape[:2]
@@ -358,7 +365,8 @@ def img_diff(
     # cv2.drawContours(show_img, contours, -1, (0, 0, 255), cv2.FILLED)
     return binary_3d, area
 
-def sort_img_list(root_dir:str):
+
+def sort_img_list(root_dir: str):
     # 定义支持的图片扩展名
     img_extensions = ['*.png', '*.jpg', '*.jpeg']
     img_list = []
@@ -404,15 +412,14 @@ def save_from_array(
     img.save(output_dir, quality=100)
 
 
-
 def load_pretrained_weights(model, checkpoint_path):
     """智能权重加载方案（支持输入通道变化，如RGB→RGB+mask）"""
 
     checkpoint = torch.load(checkpoint_path, map_location='cpu')
-    
+
     # 获取状态字典
     state_dict = checkpoint.get('state_dict', checkpoint)
-    
+
     # 清理状态字典键名
     new_weights_dict = {}
     for key, value in state_dict.items():
@@ -423,7 +430,6 @@ def load_pretrained_weights(model, checkpoint_path):
             new_weights_dict[key[7:]] = value
         else:
             new_weights_dict[key] = value
-
 
     if "intro.weight" in new_weights_dict:
         pretrained_w = new_weights_dict["intro.weight"]
@@ -442,10 +448,10 @@ def load_pretrained_weights(model, checkpoint_path):
                 new_w = pretrained_w[:, :in_c_new, :, :]
                 del new_weights_dict["intro.weight"]
                 new_weights_dict["intro.weight"] = new_w
-                
+
             else:
                 print(f"[WARN] intro.weight shape mismatch: "
-                    f"pretrained={pretrained_w.shape}, model={model_w.shape}")
+                      f"pretrained={pretrained_w.shape}, model={model_w.shape}")
                 # fallback: 使用model自带的初始化，不替换
                 del new_weights_dict["intro.weight"]
 
@@ -455,7 +461,7 @@ def load_pretrained_weights(model, checkpoint_path):
         if pretrained_w.shape != model_w.shape:
             out_c, in_c, k1, k2 = pretrained_w.shape
             out_c_new, in_c_new, _, _ = model_w.shape
-            
+
             if out_c == 3 and out_c_new == 4 and in_c == in_c_new:
                 print(f"[INFO] 扩展 ending.weight 输出通道数: {out_c} -> {out_c_new}")
                 new_w = torch.zeros(out_c_new, in_c, k1, k2)
@@ -469,11 +475,10 @@ def load_pretrained_weights(model, checkpoint_path):
                 del new_weights_dict["ending.weight"]
                 new_weights_dict["ending.weight"] = new_w
 
-
     if "ending.bias" in new_weights_dict and "ending.weight" in new_weights_dict:
         pretrained_b = new_weights_dict["ending.bias"]
         model_b = model.ending.bias if hasattr(model.ending, 'bias') else None
-        
+
         if model_b is not None and pretrained_b.shape[0] == 3 and model_b.shape[0] == 4:
             print(f"[INFO] 扩展 ending.bias: 3 -> 4")
             new_b = torch.zeros(4)
@@ -497,6 +502,7 @@ def load_pretrained_weights(model, checkpoint_path):
 
     return model
 
+
 def resize(img, target_size):
     """
     等比缩放图片，保持宽高比
@@ -507,15 +513,19 @@ def resize(img, target_size):
     new_h, new_w = int(h * scale), int(w * scale)
     return cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
+
 def crop_back_tensor(tensor):
     return tensor.squeeze(0).permute(1, 2, 0).detach().cpu().numpy()
-    
+
+
 @torch.no_grad()
 def main_main():
     # 1. 模型加载 (保持不变)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model_refine = NAFNet_dgf().to(device)
-    model_refine = load_pretrained_weights(model_refine, r"C:\Users\75241\Documents\xwechat_files\wxid_7qorwm7awnqp22_977e\msg\file\2026-03\yiwu_dgf_3c_20260312_duanmian_txue_cuzhezhou_siz512_bs16_ep086_loss0.0133.pth")
+    model_refine = load_pretrained_weights(
+        model_refine,
+        r"C:\Users\75241\Documents\xwechat_files\wxid_7qorwm7awnqp22_977e\msg\file\2026-03\yiwu_dgf_3c_20260312_duanmian_txue_cuzhezhou_siz512_bs16_ep086_loss0.0133.pth")
     model_refine.eval()
     print("refine")
 
@@ -524,7 +534,7 @@ def main_main():
     root_path = r"C:\Users\75241\Desktop\显著色溢"
     new_folder_name = r"C:\Users\75241\Desktop\显著色溢debug"
     os.makedirs(new_folder_name, exist_ok=True)
-    
+
     psd_list = sort_img_list(root_path)
     ins_seg_infer_v2 = instanceSegInferenceV2()
 
@@ -537,7 +547,7 @@ def main_main():
         yuantu_img = load_im(idx)
         if yuantu_img is None:
             continue
-        
+
         working_img = yuantu_img.copy()
         # 实例分割提取衣物区域
         ins_boxes, _, ins_mask = ins_seg_infer_v2.inference(yuantu_img)
@@ -547,7 +557,7 @@ def main_main():
             # 坐标限制
             xmin, ymin = max(xmin, 0), max(ymin, 0)
             xmax, ymax = min(xmax, yuantu_img.shape[1]), min(ymax, yuantu_img.shape[0])
-            
+
             # --- 关键修改 Step 1: 准备数据 ---
             # 原始高清 Crop (H_orig, W_orig, 3)
             img_face_hr = working_img[ymin:ymax, xmin:xmax, :].copy()
@@ -556,9 +566,9 @@ def main_main():
             target_pad_size = (pad_h, pad_w)
 
             # Resize 到 512 进模型
-            # img_face_resize = resize(img_face_hr, model_refine_input_size[0]) 
+            # img_face_resize = resize(img_face_hr, model_refine_input_size[0])
             img_face_resize = cv2.resize(img_face_hr, model_refine_input_size, interpolation=cv2.INTER_LINEAR)
-            img_tensor_512 = torch.from_numpy(img_face_resize).float().permute(2,0,1).unsqueeze(0).to(device) / 255.0
+            img_tensor_512 = torch.from_numpy(img_face_resize).float().permute(2, 0, 1).unsqueeze(0).to(device) / 255.0
 
             with torch.no_grad():
 
@@ -569,13 +579,14 @@ def main_main():
                 b_up = crop_back_tensor(b_up)
 
             res_guided_numpy = a_up * img_face_hr_float + b_up
-            final_img_base_float = img_face_hr_float + res_guided_numpy 
+            final_img_base_float = img_face_hr_float + res_guided_numpy
             final_img_base = np.clip(final_img_base_float * 255.0, 0, 255).round().astype(np.uint8)
             vis_res_base = np.clip(np.abs(res_guided_numpy) * 10 * 255.0, 0, 255).round().astype(np.uint8)
 
             save_from_array(final_img_base, os.path.join(new_dir, f"{basename}_{pid}_1_Temp.jpg"))
             # save_from_array(vis_res_base, os.path.join(new_dir, f"{basename}_{pid}_3_Res.jpg"))
             save_from_array(img_face_hr, os.path.join(new_dir, f"{basename}_{pid}_Input.jpg"))
+
 
 def calculate_psnr(img1, img2):
     """计算 PSNR"""
@@ -603,21 +614,25 @@ def quantize_nafnet(
     model_fp32,
     calib_data=None,
     qconfig_type='ort',
-    device='cuda'
+    device='cuda',
+    skip_sensitivity_analysis=True,
+    sensitivity_calib_samples=2
 ):
     """
     量化 NAFNet 模型
-    
+
     Args:
         model_fp32: FP32 模型
         calib_data: 校准数据（list of tensors）
         qconfig_type: 'ort' 或 'trt'
         device: 设备
+        skip_sensitivity_analysis: 是否跳过敏感度分析（默认跳过以加速）
+        sensitivity_calib_samples: 敏感度分析使用的校准样本数（默认2个，大幅加速）
     """
     print("=" * 70)
     print("🔧 开始量化 NAFNet 模型")
     print("=" * 70)
-    
+
     # 准备 QConfig
     if qconfig_type == 'ort':
         qconfig = get_ort_qconfig()
@@ -628,50 +643,85 @@ def quantize_nafnet(
     else:
         qconfig = get_default_qconfig()
         print(f"✅ 使用默认配置")
-    
-    print(f"\n[1/6] 开始全OP敏感度分析 (Engine: {qconfig_type})...")
-    analyzer = SensitivityAnalyzer(model_fp32, qconfig)
-    dummy_input = [torch.randn(1, 3, 64, 64) for _ in range(10)]
-    
-    # 分析所有可量化层（全OP分析）
-    sensitivity_scores = analyzer.analyze(
-        dummy_input,
-        calib_data=calib_data
-    )
-    
-    # ========================================================================
-    # 步骤 3: 保存完整报表和图表
-    # ========================================================================
-    print("[2/6] 保存敏感度分析结果...")
-    output_dir = os.path.join(project_root, "asset")
-    analyzer.save_results(output_dir)
-    
-    # ========================================================================
-    # 步骤 4: 获取自动推荐跳过的层（无需手动设定！）
-    # ========================================================================
-    quantizable_layers, skip_layers, recommendation_info = analyzer.get_recommended_layers()
-    
-    # 打印自动推荐信息
-    if recommendation_info:
-        print(f"\n    🤖 自动推荐结果:")
-        print(f"       方法: {recommendation_info.get('description', 'auto')}")
-        print(f"       Skip层数: {recommendation_info.get('skip_count', 0)}")
-        print(f"       Skip占比: {recommendation_info.get('skip_percent', 0):.1f}%")
-        print(f"       覆盖敏感度: {recommendation_info.get('coverage', 0):.1%}")
-        
-        alternatives = recommendation_info.get('alternatives', {})
-    
+
+    skip_layers = set()
+
+    if not skip_sensitivity_analysis:
+        print(f"\n[1/6] 开始全OP敏感度分析 (Engine: {qconfig_type})...")
+        analyzer = SensitivityAnalyzer(model_fp32, qconfig)
+        dummy_input = [torch.randn(1, 3, 64, 64) for _ in range(10)]
+
+        # 分析所有可量化层（全OP分析）- 使用更少的校准样本加速
+        sensitivity_scores = analyzer.analyze(
+            dummy_input,
+            calib_data=calib_data,
+            max_calib_samples=sensitivity_calib_samples
+        )
+
+        # ========================================================================
+        # 步骤 3: 保存完整报表和图表
+        # ========================================================================
+        print("[2/6] 保存敏感度分析结果...")
+        output_dir = os.path.join(project_root, "asset")
+        analyzer.save_results(output_dir)
+
+        # ========================================================================
+        # 步骤 4: 获取自动推荐跳过的层（无需手动设定！）
+        # ========================================================================
+        quantizable_layers, skip_layers, recommendation_info = analyzer.get_recommended_layers()
+
+        # 打印自动推荐信息
+        if recommendation_info:
+            print(f"\n    🤖 自动推荐结果:")
+            print(f"       方法: {recommendation_info.get('description', 'auto')}")
+            print(f"       Skip层数: {recommendation_info.get('skip_count', 0)}")
+            print(f"       Skip占比: {recommendation_info.get('skip_percent', 0):.1f}%")
+            print(f"       覆盖敏感度: {recommendation_info.get('coverage', 0):.1%}")
+
+            alternatives = recommendation_info.get('alternatives', {})
+
     # ========================================================================
     # 步骤 5: PTQ 量化
     # ========================================================================
-    print("\n[3/6] 准备量化模型...")
+    if skip_sensitivity_analysis:
+        print(f"\n[1/4] 准备量化模型 (跳过敏感度分析)...")
+    else:
+        print(f"\n[3/6] 准备量化模型...")
+
     quantizer = ModelQuantizer(model_fp32, qconfig)
     prepared_model = quantizer.prepare(skip_layers=set(skip_layers))
+
+    # 步骤 6: 校准模型
+    if skip_sensitivity_analysis:
+        print(f"\n[2/4] 校准模型...")
+    else:
+        print(f"\n[4/6] 校准模型...")
+
+    if calib_data is not None and len(calib_data) > 0:
+        quantizer.calibrate(calib_data, device=device, verbose=True)
+    else:
+        print("⚠️  未提供校准数据，使用默认参数")
+
+    # 步骤 7: 转换为推理模式
+    if skip_sensitivity_analysis:
+        print(f"\n[3/4] 转换为推理模式...")
+    else:
+        print(f"\n[5/6] 转换为推理模式...")
+
+    quantized_model = quantizer.convert()
+
+    # 步骤 8: 验证量化
+    if skip_sensitivity_analysis:
+        print(f"\n[4/4] 验证量化...")
+    else:
+        print(f"\n[6/6] 验证量化...")
+
+    print(f"✅ 量化模型已准备就绪")
     print("\n" + "=" * 70)
     print("✅ NAFNet 量化完成！")
     print("=" * 70)
-    
-    return prepared_model
+
+    return quantized_model
 
 
 @torch.no_grad()
@@ -679,88 +729,131 @@ def compare_models(
     model_fp32,
     model_quantized,
     test_img,
-    device='cuda'
+    device='cuda',
+    num_warmup=3,
+    num_inference=10
 ):
     """
-    对比 FP32 和量化模型的效果
-    
+    对比 FP32 和量化模型的效果和推理耗时
+
     Args:
         model_fp32: FP32 模型
         model_quantized: 量化模型
         test_img: 测试图像 (numpy array)
         device: 设备
-    
+        num_warmup: 预热轮数
+        num_inference: 推理轮数（用于统计平均耗时）
+
     Returns:
         dict: 包含对比结果
     """
+    import time
+
     print("\n" + "=" * 70)
     print("📊 开始对比 FP32 vs 量化模型")
     print("=" * 70)
-    
+
     # 准备输入
     h, w = test_img.shape[:2]
     img_resized = cv2.resize(test_img, (512, 512), interpolation=cv2.INTER_LINEAR)
     img_tensor = torch.from_numpy(img_resized).float().permute(2, 0, 1).unsqueeze(0).to(device) / 255.0
-    
-    # 1. FP32 推理
-    print("\n[1/2] FP32 模型推理...")
+
+    # 1. FP32 推理 + 耗时统计
+    print(f"\n[1/2] FP32 模型推理 (预热 {num_warmup} 次，测试 {num_inference} 次)...")
     model_fp32.eval()
-    res_a_fp32, res_b_fp32 = model_fp32(img_tensor)
+
+    # 预热
+    for _ in range(num_warmup):
+        _ = model_fp32(img_tensor)
+
+    # 正式推理计时
+    fp32_times = []
+    for i in range(num_inference):
+        start_time = time.time()
+        res_a_fp32, res_b_fp32 = model_fp32(img_tensor)
+        fp32_times.append(time.time() - start_time)
+
     a_up_fp32 = F.interpolate(res_a_fp32, size=(h, w), mode='bilinear', align_corners=False)
     b_up_fp32 = F.interpolate(res_b_fp32, size=(h, w), mode='bilinear', align_corners=False)
     a_up_fp32_np = crop_back_tensor(a_up_fp32)
     b_up_fp32_np = crop_back_tensor(b_up_fp32)
-    
-    # 2. 量化模型推理
-    print("\n[2/2] 量化模型推理...")
+
+    # 2. 量化模型推理 + 耗时统计
+    print(f"\n[2/2] 量化模型推理 (预热 {num_warmup} 次，测试 {num_inference} 次)...")
     model_quantized.eval()
-    res_a_quant, res_b_quant = model_quantized(img_tensor)
+
+    # 预热
+    for _ in range(num_warmup):
+        _ = model_quantized(img_tensor)
+
+    # 正式推理计时
+    quant_times = []
+    for i in range(num_inference):
+        start_time = time.time()
+        res_a_quant, res_b_quant = model_quantized(img_tensor)
+        quant_times.append(time.time() - start_time)
+
     a_up_quant = F.interpolate(res_a_quant, size=(h, w), mode='bilinear', align_corners=False)
     b_up_quant = F.interpolate(res_b_quant, size=(h, w), mode='bilinear', align_corners=False)
     a_up_quant_np = crop_back_tensor(a_up_quant)
     b_up_quant_np = crop_back_tensor(b_up_quant)
-    
+
     # 计算差异
     print("\n[对比结果]")
     print("-" * 70)
-    
+
     img_float = test_img.astype(np.float32) / 255.0
-    
+
     # FP32 结果
     res_guided_fp32 = a_up_fp32_np * img_float + b_up_fp32_np
     final_img_fp32 = img_float + res_guided_fp32
     final_img_fp32_uint8 = np.clip(final_img_fp32 * 255.0, 0, 255).round().astype(np.uint8)
-    
+
     # 量化结果
     res_guided_quant = a_up_quant_np * img_float + b_up_quant_np
     final_img_quant = img_float + res_guided_quant
     final_img_quant_uint8 = np.clip(final_img_quant * 255.0, 0, 255).round().astype(np.uint8)
-    
+
     # 计算指标
     psnr_a = calculate_psnr(a_up_fp32_np * 255, a_up_quant_np * 255)
     psnr_b = calculate_psnr(b_up_fp32_np * 255, b_up_quant_np * 255)
     psnr_final = calculate_psnr(final_img_fp32_uint8, final_img_quant_uint8)
-    
+
     ssim_a = calculate_ssim((a_up_fp32_np * 255).astype(np.uint8), (a_up_quant_np * 255).astype(np.uint8))
     ssim_b = calculate_ssim((b_up_fp32_np * 255).astype(np.uint8), (b_up_quant_np * 255).astype(np.uint8))
     ssim_final = calculate_ssim(final_img_fp32_uint8, final_img_quant_uint8)
-    
+
+    # 计算耗时统计
+    fp32_mean = np.mean(fp32_times) * 1000
+    fp32_std = np.std(fp32_times) * 1000
+    quant_mean = np.mean(quant_times) * 1000
+    quant_std = np.std(quant_times) * 1000
+    speedup = fp32_mean / quant_mean
+
+    print(f"   [精度指标]")
     print(f"   最终图像 PSNR: {psnr_final:.2f} dB")
     print(f"   最终图像 SSIM: {ssim_final:.4f}")
+    print(f"\n   [推理耗时]")
+    print(f"   FP32 模型: {fp32_mean:.2f} ± {fp32_std:.2f} ms (平均 ± 标准差)")
+    print(f"   量化模型: {quant_mean:.2f} ± {quant_std:.2f} ms (平均 ± 标准差)")
+    print(f"   加速比: {speedup:.2f}x")
     print("-" * 70)
-    
+
     return {
         'fp32': final_img_fp32_uint8,
         'quantized': final_img_quant_uint8,
         'psnr_final': psnr_final,
         'ssim_final': ssim_final,
+        'fp32_time_ms': fp32_mean,
+        'quant_time_ms': quant_mean,
+        'speedup': speedup
     }
 
 
 def prepare_calib_data_from_images(img_list, device, num_calib=5):
     """
     从图像列表准备校准数据
-    
+
     Args:
         img_list: 图像路径列表
         device: 设备
@@ -768,132 +861,395 @@ def prepare_calib_data_from_images(img_list, device, num_calib=5):
     """
     calib_data = []
     num_used = min(num_calib, len(img_list))
-    
+
     print(f"\n[准备校准数据] 使用 {num_used} 张测试集图像")
-    
+
     for i in range(num_used):
         img_path = img_list[i]
         img = load_im(img_path)
-        
+
         # Resize 到 512x512
         img_resized = cv2.resize(img, (512, 512), interpolation=cv2.INTER_LINEAR)
-        
+
         # 转换为 tensor
         img_tensor = torch.from_numpy(img_resized).float().permute(2, 0, 1).unsqueeze(0).to(device) / 255.0
         calib_data.append(img_tensor)
-        
-        print(f"   [{i+1}/{num_used}] {os.path.basename(img_path)}")
-    
+
+        print(f"   [{i + 1}/{num_used}] {os.path.basename(img_path)}")
+
     return calib_data
+
+
+class ONNXRuntimeInference:
+    """
+    ONNX Runtime 推理引擎包装类
+
+    Author: jihui
+    Date: 2026-03-19
+    Desc: 提供 ONNX Runtime 推理功能，支持 FP32 和量化模型
+    """
+
+    def __init__(self, onnx_path: str, providers=None):
+        """
+        初始化 ONNX Runtime 推理引擎
+
+        Args:
+            onnx_path: ONNX 模型路径
+            providers: 推理提供商列表，默认使用 CPUExecutionProvider
+        """
+        import onnxruntime as ort
+
+        if providers is None:
+            providers = ['CPUExecutionProvider']
+
+        self.session = ort.InferenceSession(onnx_path, providers=providers)
+        self.input_name = self.session.get_inputs()[0].name
+        self.output_names = [output.name for output in self.session.get_outputs()]
+
+        print(f"✅ ONNX Runtime 引擎初始化成功")
+        print(f"   模型: {os.path.basename(onnx_path)}")
+        print(f"   输入: {self.input_name}")
+        print(f"   输出: {self.output_names}")
+        print(f"   提供商: {providers}")
+
+    def inference(self, input_data: np.ndarray):
+        """
+        执行推理
+
+        Args:
+            input_data: 输入数据 (numpy array)
+
+        Returns:
+            推理结果
+        """
+        outputs = self.session.run(
+            self.output_names,
+            {self.input_name: input_data}
+        )
+        return outputs
+
+    def benchmark(self, input_data: np.ndarray, num_warmup: int = 5, num_inference: int = 20):
+        """
+        性能基准测试
+
+        Args:
+            input_data: 输入数据
+            num_warmup: 预热次数
+            num_inference: 推理次数
+
+        Returns:
+            (mean_time_ms, std_time_ms, times_list)
+        """
+        import time
+
+        # 预热
+        for _ in range(num_warmup):
+            self.inference(input_data)
+
+        # 正式测试
+        times = []
+        for _ in range(num_inference):
+            start_time = time.time()
+            self.inference(input_data)
+            times.append(time.time() - start_time)
+
+        mean_ms = np.mean(times) * 1000
+        std_ms = np.std(times) * 1000
+
+        return mean_ms, std_ms, times
+
+
+def export_fp32_to_onnx(model, dummy_input, output_path: str, opset_version: int = 13):
+    """
+    导出 FP32 模型为 ONNX
+
+    Args:
+        model: PyTorch FP32 模型
+        dummy_input: 输入样例
+        output_path: 输出 ONNX 路径
+        opset_version: ONNX opset 版本
+    """
+    print("\n" + "=" * 70)
+    print("📤 导出 FP32 模型为 ONNX")
+    print("=" * 70)
+
+    model.eval()
+
+    torch.onnx.export(
+        model,
+        dummy_input,
+        output_path,
+        export_params=True,
+        opset_version=opset_version,
+        do_constant_folding=True,
+        input_names=['input'],
+        output_names=['output_a', 'output_b'],
+        dynamic_axes={
+            'input': {0: 'batch_size'},
+            'output_a': {0: 'batch_size'},
+            'output_b': {0: 'batch_size'}
+        },
+        dynamo=False,
+        verbose=False
+    )
+
+    # 验证 ONNX
+    import onnx
+    onnx_model = onnx.load(output_path)
+    onnx.checker.check_model(onnx_model)
+
+    print(f"✅ FP32 ONNX 模型已导出: {output_path}")
+    print(f"   节点数量: {len(onnx_model.graph.node)}")
+    print(f"   输入: {[n.name for n in onnx_model.graph.input]}")
+    print(f"   输出: {[n.name for n in onnx_model.graph.output]}")
+
+
+def compare_onnx_models(
+    fp32_onnx_path: str,
+    quant_onnx_path: str,
+    test_img: np.ndarray,
+    output_dir: str,
+    num_warmup: int = 5,
+    num_inference: int = 20
+):
+    """
+    对比 FP32 和量化 ONNX 模型的推理速度和精度
+
+    Args:
+        fp32_onnx_path: FP32 ONNX 模型路径
+        quant_onnx_path: 量化 ONNX 模型路径
+        test_img: 测试图像
+        output_dir: 输出目录
+        num_warmup: 预热次数
+        num_inference: 推理次数
+
+    Returns:
+        dict: 对比结果
+    """
+    print("\n" + "=" * 70)
+    print("🚀 ONNX Runtime 推理速度与精度对比")
+    print("=" * 70)
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 准备输入
+    h, w = test_img.shape[:2]
+    img_resized = cv2.resize(test_img, (512, 512), interpolation=cv2.INTER_LINEAR)
+    img_np = img_resized.astype(np.float32) / 255.0
+    img_np = img_np.transpose(2, 0, 1)[np.newaxis, ...]
+
+    # 1. FP32 ONNX 推理
+    print(f"\n[1/2] FP32 ONNX 模型推理 (预热 {num_warmup} 次，测试 {num_inference} 次)...")
+    fp32_engine = ONNXRuntimeInference(fp32_onnx_path)
+    fp32_mean, fp32_std, _ = fp32_engine.benchmark(
+        img_np, num_warmup=num_warmup, num_inference=num_inference
+    )
+    fp32_outputs = fp32_engine.inference(img_np)
+    res_a_fp32 = torch.from_numpy(fp32_outputs[0])
+    res_b_fp32 = torch.from_numpy(fp32_outputs[1])
+
+    a_up_fp32 = F.interpolate(res_a_fp32, size=(h, w), mode='bilinear', align_corners=False)
+    b_up_fp32 = F.interpolate(res_b_fp32, size=(h, w), mode='bilinear', align_corners=False)
+    a_up_fp32_np = a_up_fp32.squeeze(0).permute(1, 2, 0).numpy()
+    b_up_fp32_np = b_up_fp32.squeeze(0).permute(1, 2, 0).numpy()
+
+    # 2. QDQ 量化 ONNX 推理
+    print(f"\n[2/2] QDQ 量化 ONNX 模型推理 (预热 {num_warmup} 次，测试 {num_inference} 次)...")
+    quant_engine = ONNXRuntimeInference(quant_onnx_path)
+    quant_mean, quant_std, _ = quant_engine.benchmark(
+        img_np, num_warmup=num_warmup, num_inference=num_inference
+    )
+    quant_outputs = quant_engine.inference(img_np)
+    res_a_quant = torch.from_numpy(quant_outputs[0])
+    res_b_quant = torch.from_numpy(quant_outputs[1])
+
+    a_up_quant = F.interpolate(res_a_quant, size=(h, w), mode='bilinear', align_corners=False)
+    b_up_quant = F.interpolate(res_b_quant, size=(h, w), mode='bilinear', align_corners=False)
+    a_up_quant_np = a_up_quant.squeeze(0).permute(1, 2, 0).numpy()
+    b_up_quant_np = b_up_quant.squeeze(0).permute(1, 2, 0).numpy()
+
+    # 计算最终图像
+    img_float = test_img.astype(np.float32) / 255.0
+
+    # FP32 结果
+    res_guided_fp32 = a_up_fp32_np * img_float + b_up_fp32_np
+    final_img_fp32 = img_float + res_guided_fp32
+    final_img_fp32_uint8 = np.clip(final_img_fp32 * 255.0, 0, 255).round().astype(np.uint8)
+
+    # QDQ 量化结果
+    res_guided_quant = a_up_quant_np * img_float + b_up_quant_np
+    final_img_quant = img_float + res_guided_quant
+    final_img_quant_uint8 = np.clip(final_img_quant * 255.0, 0, 255).round().astype(np.uint8)
+
+    # 计算精度指标
+    psnr_final = calculate_psnr(final_img_fp32_uint8, final_img_quant_uint8)
+    ssim_final = calculate_ssim(final_img_fp32_uint8, final_img_quant_uint8)
+
+    # 计算加速比
+    speedup_qdq = fp32_mean / quant_mean
+
+    # 打印结果
+    print("\n[对比结果]")
+    print("-" * 70)
+    print(f"   [精度指标]")
+    print(f"   最终图像 PSNR: {psnr_final:.2f} dB")
+    print(f"   最终图像 SSIM: {ssim_final:.4f}")
+    print(f"\n   [推理耗时 (ONNX Runtime, CPU)]")
+    print(f"   FP32 模型: {fp32_mean:.2f} ± {fp32_std:.2f} ms")
+    print(f"   QDQ 量化: {quant_mean:.2f} ± {quant_std:.2f} ms")
+    print(f"   加速比: {speedup_qdq:.2f}x")
+    print("-" * 70)
+
+    # 保存结果
+    save_from_array(final_img_fp32_uint8, os.path.join(output_dir, "result_fp32_onnx.jpg"))
+    save_from_array(final_img_quant_uint8, os.path.join(output_dir, "result_qdq_onnx.jpg"))
+    save_from_array(test_img, os.path.join(output_dir, "input.jpg"))
+
+    # 保存差异图
+    diff_img = np.abs(final_img_fp32_uint8.astype(np.int32) - final_img_quant_uint8.astype(np.int32)).astype(np.uint8)
+    diff_img = np.clip(diff_img * 10, 0, 255).astype(np.uint8)
+    save_from_array(diff_img, os.path.join(output_dir, "difference_qdq_onnx.jpg"))
+
+    print(f"\n   结果已保存到: {output_dir}")
+
+    return {
+        'fp32': final_img_fp32_uint8,
+        'qdq_quantized': final_img_quant_uint8,
+        'psnr_final': psnr_final,
+        'ssim_final': ssim_final,
+        'fp32_time_ms': fp32_mean,
+        'qdq_time_ms': quant_mean,
+        'speedup_qdq': speedup_qdq
+    }
 
 
 @torch.no_grad()
 def main_with_quantization():
     """
-    主函数：包含完整的量化和对比流程
+    主函数：包含完整的量化、ONNX导出和对比流程
     """
     print("=" * 70)
-    print("🚀 NAFNet 量化与对比完整流程")
+    print("🚀 NAFNet 量化、ONNX导出与对比完整流程")
     print("=" * 70)
-    
+
     # 1. 模型加载
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"\n[步骤 1] 加载 FP32 模型到 {device}")
     model_fp32 = NAFNet_dgf().to(device)
     model_fp32 = load_pretrained_weights(
-        model_fp32, 
+        model_fp32,
         r"C:\Users\75241\Documents\xwechat_files\wxid_7qorwm7awnqp22_977e\msg\file\2026-03\yiwu_dgf_3c_20260312_duanmian_txue_cuzhezhou_siz512_bs16_ep086_loss0.0133.pth"
     )
     model_fp32.eval()
-    
+
     # 2. 准备校准数据（使用你的测试集！）
     print("\n[步骤 2] 准备校准数据")
     root_path = r"C:\Users\75241\Desktop\显著色溢"
     psd_list = sort_img_list(root_path)
-    
+
     if len(psd_list) == 0:
         print("⚠️  没有找到测试图像！使用 dummy 数据")
         calib_data = [torch.randn(1, 3, 512, 512).to(device) for _ in range(5)]
     else:
         # 使用你的测试集图像进行校准！
         calib_data = prepare_calib_data_from_images(psd_list, device, num_calib=min(10, len(psd_list)))
-    
+
     print(f"   校准数据数量: {len(calib_data)}")
-    
+
     # 3. 量化模型
     model_quantized = quantize_nafnet(
         model_fp32,
         calib_data=calib_data,
         qconfig_type='ort',
-        device=device
+        device=device,
+        skip_sensitivity_analysis=False
     )
-    
+
     # 4. 准备测试数据
     print("\n[步骤 3] 准备测试图像")
     root_path = r"C:\Users\75241\Desktop\显著色溢"
     psd_list = sort_img_list(root_path)
-    
+
     if len(psd_list) == 0:
         print("⚠️  没有找到测试图像！使用 dummy 图像")
         test_img = np.random.randint(0, 256, (512, 512, 3), dtype=np.uint8)
     else:
         test_img = load_im(psd_list[0])
         print(f"   测试图像: {os.path.basename(psd_list[0])}")
-    
-    # 5. 对比模型
-    results = compare_models(
+
+    # 5. 准备 dummy input 用于 ONNX 导出
+    dummy_input = torch.randn(1, 3, 512, 512).to(device)
+
+    # 6. 导出 ONNX 模型
+    print("\n[步骤 4] 导出 ONNX 模型")
+    output_dir = r"C:\Users\75241\Desktop\显著色溢_quant_compare"
+    os.makedirs(output_dir, exist_ok=True)
+
+    fp32_onnx_path = os.path.join(output_dir, "nafnet_fp32.onnx")
+    quant_onnx_path = os.path.join(output_dir, "nafnet_quantized.onnx")
+
+    # 导出 FP32 ONNX
+    export_fp32_to_onnx(model_fp32, dummy_input, fp32_onnx_path)
+
+    # 导出量化 ONNX
+    print("\n" + "=" * 70)
+    print("📤 导出量化模型为 ONNX (含 QDQ 节点)")
+    print("=" * 70)
+    ONNXExporter.export(
+        model_quantized,
+        dummy_input,
+        quant_onnx_path,
+        opset_version=13,
+        input_names=['input'],
+        output_names=['output_a', 'output_b'],
+        dynamic_axes={
+            'input': {0: 'batch_size'},
+            'output_a': {0: 'batch_size'},
+            'output_b': {0: 'batch_size'}
+        },
+        verbose=False
+    )
+
+    # 7. 使用 ONNX Runtime 对比模型
+    print("\n[步骤 5] ONNX Runtime 推理对比")
+    onnx_results = compare_onnx_models(
+        fp32_onnx_path,
+        quant_onnx_path,
+        test_img,
+        output_dir,
+        num_warmup=5,
+        num_inference=20
+    )
+
+    # 8. 也运行 PyTorch 模型对比（可选参考）
+    print("\n[步骤 6] PyTorch 模型对比（参考）")
+    torch_results = compare_models(
         model_fp32,
         model_quantized,
         test_img,
         device=device
     )
-    
-    # 6. 保存结果
-    print("\n[步骤 4] 保存对比结果")
-    output_dir = r"C:\Users\75241\Desktop\显著色溢_quant_compare"
-    os.makedirs(output_dir, exist_ok=True)
-    
-    save_from_array(results['fp32'], os.path.join(output_dir, "result_fp32.jpg"))
-    save_from_array(results['quantized'], os.path.join(output_dir, "result_quantized.jpg"))
-    save_from_array(test_img, os.path.join(output_dir, "input.jpg"))
-    
-    # 保存对比图
-    diff_img = np.abs(results['fp32'].astype(np.int32) - results['quantized'].astype(np.int32)).astype(np.uint8)
-    diff_img = np.clip(diff_img * 10, 0, 255).astype(np.uint8)
-    save_from_array(diff_img, os.path.join(output_dir, "difference.jpg"))
-    
-    print(f"   结果已保存到: {output_dir}")
-    
-    # # 7. 可选：导出 ONNX
-    # print("\n[可选步骤] 导出 ONNX 模型")
-    # try:
-    #     dummy_input = torch.randn(1, 3, 512, 512).to(device)
-    #     onnx_path = os.path.join(output_dir, "nafnet_quantized.onnx")
-    #     ONNXExporter.export(
-    #         model_quantized,
-    #         dummy_input,
-    #         onnx_path,
-    #         opset_version=18,
-    #         verbose=False
-    #     )
-    # except Exception as e:
-    #     print(f"⚠️  ONNX 导出跳过: {e}")
-    
-    # print("\n" + "=" * 70)
-    # print("✅ 所有流程完成！")
-    # print("=" * 70)
+
+    print("\n" + "=" * 70)
+    print("✅ 所有流程完成！")
+    print("=" * 70)
+    print(f"   FP32 ONNX: {fp32_onnx_path}")
+    print(f"   量化 ONNX: {quant_onnx_path}")
+    print(f"   结果目录: {output_dir}")
+    print(f"   ONNX Runtime 加速比: {onnx_results['speedup_qdq']:.2f}x")
+    print("=" * 70)
 
 
 if __name__ == "__main__":
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="NAFNet 推理和量化")
-    parser.add_argument('--mode', type=str, default='fp32', 
-                       choices=['fp32', 'quant', 'compare'],
-                       help="运行模式: fp32 (仅FP32), quant (仅量化), compare (对比)")
-    
+    parser.add_argument('--mode', type=str, default='fp32',
+                        choices=['fp32', 'quant', 'compare'],
+                        help="运行模式: fp32 (仅FP32), quant (仅量化), compare (对比)")
+
     args = parser.parse_args()
-    
+
     if args.mode == 'fp32':
         print("\n🎯 运行 FP32 推理模式")
         main_main()
@@ -903,4 +1259,3 @@ if __name__ == "__main__":
     elif args.mode == 'compare':
         print("\n🎯 运行对比模式")
         main_with_quantization()
-

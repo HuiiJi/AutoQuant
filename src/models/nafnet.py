@@ -128,8 +128,8 @@ class NAFNet_flow(nn.Module):
         img_channel=3,
         width=8,
         middle_blk_num=1,
-        enc_blk_nums=[1,1,1,1],
-        dec_blk_nums=[1,1,1,1],
+        enc_blk_nums=[1, 1, 1, 1],
+        dec_blk_nums=[1, 1, 1, 1],
     ):
         super().__init__()
 
@@ -144,10 +144,10 @@ class NAFNet_flow(nn.Module):
         )
 
         self.ending = nn.Sequential(
-                nn.Conv2d(in_channels=width, out_channels=2, 
-                          kernel_size=3, padding=1, stride=1, groups=1, bias=True),
-                nn.Tanh()
-            )
+            nn.Conv2d(in_channels=width, out_channels=2,
+                      kernel_size=3, padding=1, stride=1, groups=1, bias=True),
+            nn.Tanh()
+        )
 
         self.encoders = nn.ModuleList()
         self.decoders = nn.ModuleList()
@@ -229,27 +229,28 @@ class ConvGuidedFilter(nn.Module):
             nn.Conv2d(32, 3, kernel_size=1, bias=False),
         )
 
-           # 初始化为均值滤波器
-        self.box_filter.weight.data[...] = 1.0 / (2*radius+1)**2
+        # 初始化为均值滤波器
+        self.box_filter.weight.data[...] = 1.0 / (2 * radius + 1)**2
 
     def forward(self, x_lr, y_lr):
         _, _, h_lrx, w_lrx = x_lr.size()
 
         N = self.box_filter(torch.ones((1, 3, h_lrx, w_lrx)).to(x_lr.device))
 
-        ## mean_x
+        # mean_x
         mean_x = self.box_filter(x_lr) / N
-        ## mean_y
+        # mean_y
         mean_y = self.box_filter(y_lr) / N
-        ## cov_xy
+        # cov_xy
         cov_xy = self.box_filter(x_lr * y_lr) / N - mean_x * mean_y
-        ## var_x
+        # var_x
         var_x = self.box_filter(x_lr * x_lr) / N - mean_x * mean_x
-        ## A
+        # A
         A = self.conv_a(torch.cat([cov_xy, var_x], dim=1))
-        ## b
+        # b
         b = mean_y - A * mean_x
         return A, b
+
 
 class NAFNet_dgf(nn.Module):
     def __init__(
@@ -257,8 +258,8 @@ class NAFNet_dgf(nn.Module):
         img_channel=3,
         width=8,
         middle_blk_num=2,
-        enc_blk_nums=[1,2,2,2],
-        dec_blk_nums=[2,2,2,1],
+        enc_blk_nums=[1, 2, 2, 2],
+        dec_blk_nums=[2, 2, 2, 1],
     ):
         super().__init__()
 
@@ -340,8 +341,8 @@ class NAFNet_dgf_4c(nn.Module):
         img_channel=4,
         width=8,
         middle_blk_num=2,
-        enc_blk_nums=[1,2,2,2],
-        dec_blk_nums=[2,2,2,1],
+        enc_blk_nums=[1, 2, 2, 2],
+        dec_blk_nums=[2, 2, 2, 1],
     ):
         super().__init__()
 
@@ -390,30 +391,29 @@ class NAFNet_dgf_4c(nn.Module):
                 )
             )
             chan = chan // 2
-            dec = nn.Sequential(*[NAFBlock(chan) for _ in range(num)]) 
+            dec = nn.Sequential(*[NAFBlock(chan) for _ in range(num)])
             self.decoders.append(dec)
             self.attentions.append(WrinkleAttention(chan))
-
 
     def forward(self, inp, mask):
         com = torch.concat([inp, mask], dim=1)
         x = self.intro(com)
         encs = []
-        
+
         # Encoder 流程
         for encoder, down in zip(self.encoders, self.downs):
             x = encoder(x)
             encs.append(x)
             x = down(x)
-            
+
         x = self.middle_blks(x)
-        
+
         for decoder, up, enc_skip, attn in zip(self.decoders, self.ups, encs[::-1], self.attentions):
             x = up(x)
             x = x + enc_skip
             x = decoder(x)
-            x = attn(x, mask) 
-            
+            x = attn(x, mask)
+
         x = self.ending(x)
 
         A_lr, b_lr = self.gf(inp, x)

@@ -19,7 +19,7 @@ class PACTFakeQuantize(FakeQuantizeBase):
     PACT (Parameterized Clipping Activation)
     论文：https://arxiv.org/abs/1805.06085
     用于激活值的可学习裁剪范围，主要用于 QAT 训练
-    
+
     特点：
     - alpha 是 nn.Parameter，通过反向传播学习裁剪上界
     - 配合标准的 FakeQuant 一起使用
