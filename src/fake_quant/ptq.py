@@ -69,29 +69,18 @@ class PTQFakeQuantize(FakeQuantizeBase):
             # A. 先让 Observer 统计当前数据 (更新 min/max 或直方图)
             self.observer(x)
 
-            # B. 【关键】从 Observer 获取“临时”的 qparams
-            # 注意：这里需要你的 Observer 支持随时计算当前状态的 qparams
-            # 即使还没有调用最终的 calculate_qparams，Observer 内部应该有当前的 min_val/max_val
             temp_scale, temp_zero_point = self.observer.calculate_qparams()
-
-            # 如果 Observer 还没统计出有效值 (比如第一步)，则无法量化，直接返回
             if temp_scale is None:
                 return x
 
             scale = temp_scale
             zero_point = temp_zero_point
 
-        # ==========================================
-        # 确保 scale 和 zero_point 没有梯度 (detach)
-        # ==========================================
         if isinstance(scale, torch.Tensor):
             scale = scale.detach()
         if isinstance(zero_point, torch.Tensor):
             zero_point = zero_point.detach()
 
-        # ==========================================
-        # 执行 Fake Quantize (统一出口)
-        # ==========================================
         if self.qscheme in [QScheme.PER_CHANNEL_AFFINE, QScheme.PER_CHANNEL_SYMMETRIC]:
             # 确保 zero_point 类型正确，ONNX 导出通常需要 int32
             if zero_point.dtype not in [torch.int32, torch.float32]:

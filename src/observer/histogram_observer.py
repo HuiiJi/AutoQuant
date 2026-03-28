@@ -35,11 +35,16 @@ class HistogramObserver(ObserverBase):
 
         # 初始化直方图
         self.histogram = None
+        self._frozen = False  # 是否已固化（convert 后设为 True）
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         前向传播，收集直方图
         """
+        # 如果已固化（convert 后），不做任何计算，直接返回
+        if self._frozen:
+            return x
+        
         if not self.enabled:
             return x
 
@@ -130,13 +135,18 @@ class HistogramObserver(ObserverBase):
         """
         基于直方图计算量化参数
         使用 KL 散度来找到最佳阈值
-
+        
         如果没有统计数据，返回 (None, None)
+        
+        注意：此方法会固化 observer，之后 forward 不再计算 histogram
         """
         # 如果没有统计数据，返回 (None, None)
         if self.histogram is None or self._min_val is None or self._max_val is None:
             return None, None
-
+        
+        # 固化 observer，避免之后每次 forward 重复计算
+        self._frozen = True
+        
         if self.qscheme in [QScheme.PER_CHANNEL_AFFINE, QScheme.PER_CHANNEL_SYMMETRIC]:
             return self._calculate_qparams_per_channel()
         else:
@@ -216,4 +226,5 @@ class HistogramObserver(ObserverBase):
         self._min_val = None
         self._max_val = None
         self._scale = None
+        self._frozen = False  # 重置固化标志
         self._zero_point = None

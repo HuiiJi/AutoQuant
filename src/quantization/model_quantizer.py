@@ -41,6 +41,11 @@ from typing import Dict, Optional, Set, List, Tuple
 from autoquant.utils import QConfig
 from autoquant.fake_quant import PTQFakeQuantize
 from autoquant.core import QScheme
+from autoquant.utils.quantizable_ops import (
+    is_module_quantizable, 
+    get_quantizable_layers,
+    get_quantizable_op_names
+)
 
 
 # ============================================================================
@@ -112,13 +117,9 @@ class QuantizableModule(nn.Module):
     ──────────────────────────────────────────────────────────────
     """
 
-    # 需要量化 weight 的模块类型
-    WEIGHT_QUANT_MODULES = {
-        'Conv1d', 'Conv2d', 'Conv3d',
-        'ConvTranspose1d', 'ConvTranspose2d', 'ConvTranspose3d',
-        'Linear', 'Bilinear',
-        'Embedding', 'EmbeddingBag'
-    }
+    # 需要量化 weight 的模块类型（使用统一的工具函数获取）
+    # 这些模块既有 weight 参数，又需要量化 weight
+    WEIGHT_QUANT_MODULES = get_quantizable_op_names()
 
     def __init__(self, module: nn.Module, qconfig: QConfig):
         super().__init__()
@@ -189,7 +190,6 @@ class QuantizableModule(nn.Module):
                 # 其他类型（如 Embedding）直接调用原模块
                 output = self.module(x_quant)
         else:
-            # 无 weight 的模块（激活函数、池化等）
             output = self.module(x_quant)
 
         return output
@@ -360,7 +360,7 @@ class ModelQuantizer:
         self.prepared_model.to(device)
 
         if verbose:
-            print("🔧 开始校准...")
+            print("[WARNING] 开始校准...")
 
         with torch.no_grad():
             if isinstance(calib_data, torch.utils.data.DataLoader):
@@ -392,7 +392,7 @@ class ModelQuantizer:
                 raise ValueError(f"不支持的校准数据类型：{type(calib_data)}")
 
         if verbose:
-            print("✅ 校准完成！")
+            print("[OK] 校准完成！")
 
     def convert(self, inplace: bool = False, permanently_quantize_weight: bool = False) -> nn.Module:
         """
@@ -402,8 +402,6 @@ class ModelQuantizer:
             raise ValueError("请先调用 prepare() 和 calibrate()")
 
         if not inplace:
-            # 在 deepcopy 之前，先 detach 所有非 graph leaf 的 tensors
-            # 这样可以避免 RuntimeError: Only Tensors created explicitly by the user support deepcopy
             self._prepare_model_for_deepcopy(self.prepared_model)
             model = copy.deepcopy(self.prepared_model)
         else:
@@ -459,8 +457,6 @@ class ModelQuantizer:
                     module.calculate_qparams()
                 if hasattr(module, 'disable_observer'):
                     module.disable_observer()
-            # 注意：不移除对 QuantStub/DeQuantStub 的检查，因为它们是自定义的
-            # elif isinstance(module, (nn.QuantStub, nn.DeQuantStub)):  # ❌ 这不是 PyTorch 标准模块
             else:
                 full_name = f"{prefix}.{name}" if prefix else name
                 self._convert_modules(module, permanently_quantize_weight, full_name)
@@ -473,40 +469,53 @@ class ModelQuantizer:
             self._save_original_modules(module, full_name)
 
     def _replace_quantizable_modules(self, model: nn.Module, skip_layers: Optional[Set[str]] = None, prefix: str = ""):
-        """替换可量化模块为 QuantizableModule"""
+        """
+        替换可量化模块为 QuantizableModule
+        
+        支持两种跳过模式：
+        1. 精确匹配：skip_layers={'layer4.0.conv1'} - 只跳过这一个模块
+        2. 前缀匹配：skip_layers={'gf'} - 跳过 gf 及其所有子模块
+        
+        Args:
+            model: 要处理的模型
+            skip_layers: 要跳过的层名集合
+            prefix: 当前模块的前缀路径
+        """
         for name, module in model.named_children():
             full_name = f"{prefix}.{name}" if prefix else name
             should_quantize = True
+            
+            # 检查是否应该跳过
             if skip_layers is not None and full_name in skip_layers:
                 should_quantize = False
-
+                # 关键修复：不再递归处理子模块！跳过整个模块树
+                # 这样 gf 及其所有子模块都不会被量化
+                if not prefix.startswith(full_name):
+                    # 仍然打印日志用于调试
+                    # print(f"    [SKIP] 跳过模块树: {full_name} (及其所有子模块)")
+                    pass
+                continue  # 不再递归处理这个模块的子模块
+            
             if should_quantize and self._is_quantizable(module):
                 quant_module = self._create_quantized_module(module)
                 setattr(model, name, quant_module)
                 self.quantized_modules[full_name] = quant_module
             else:
+                # 继续递归处理子模块
                 self._replace_quantizable_modules(module, skip_layers, full_name)
 
     def _is_quantizable(self, module: nn.Module) -> bool:
-        """判断模块是否可量化"""
-        quantizable_types = (
-            # Conv 系列
-            nn.Conv1d, nn.Conv2d, nn.Conv3d,
-            nn.ConvTranspose1d, nn.ConvTranspose2d, nn.ConvTranspose3d,
-            # Linear
-            nn.Linear, nn.Bilinear,
-            # 嵌入层
-            nn.Embedding, nn.EmbeddingBag,
-            # 激活函数
-            nn.ReLU, nn.ReLU6, nn.LeakyReLU, nn.PReLU,
-            nn.ELU, nn.SELU, nn.CELU, nn.GELU, nn.SiLU, nn.Hardswish,
-            # 池化层
-            nn.MaxPool1d, nn.MaxPool2d, nn.MaxPool3d,
-            nn.AvgPool1d, nn.AvgPool2d, nn.AvgPool3d,
-            nn.AdaptiveMaxPool1d, nn.AdaptiveMaxPool2d, nn.AdaptiveMaxPool3d,
-            nn.AdaptiveAvgPool1d, nn.AdaptiveAvgPool2d, nn.AdaptiveAvgPool3d,
-        )
-        return isinstance(module, quantizable_types)
+        """
+        判断模块是否可量化 - 使用统一的工具函数
+        
+        支持的模块类型由 quantizable_ops 模块统一管理
+        可以通过 include_extra 和 exclude_ops 参数自定义
+        
+        Returns:
+            bool: True 如果模块可量化，否则 False
+        """
+        # 使用统一的工具函数判断
+        return is_module_quantizable(module)
 
     def _create_quantized_module(self, module: nn.Module) -> nn.Module:
         """创建量化版本的模块"""

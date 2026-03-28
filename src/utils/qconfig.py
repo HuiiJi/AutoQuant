@@ -85,7 +85,7 @@ def get_ort_qconfig() -> QConfig:
     # Activation: PER_TENSOR_SYMMETRIC + MovingAverageMinMaxObserver
     def activation_fq():
         observer = MovingAverageMinMaxObserver(
-            dtype=QuantDtype.QUINT8,
+            dtype=QuantDtype.QINT8,
             qscheme=QScheme.PER_TENSOR_SYMMETRIC,
         )
         return PTQFakeQuantize(observer=observer)

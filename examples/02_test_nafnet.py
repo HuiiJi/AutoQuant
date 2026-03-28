@@ -382,36 +382,6 @@ def sort_img_list(root_dir: str):
     return img_list
 
 
-def save_from_array(
-    inp: np.ndarray,
-    output_dir: str,
-) -> None:
-    """从字典中保存结果到指定的目录下。
-
-    Args:
-        output_dir (str): 输出目录路径。
-        result_dict (Dict[str, Any]): 结果字典，包含'image', 'prediction', 'gt'三个键。
-        image_name (str): 图片名称，用于生成最终保存的文件名。
-        suffix (str, optional): 后缀名，用于生成最终保存的文件名。默认是空字符串。
-
-    Returns:
-        None
-    """
-    if not isinstance(inp, np.ndarray):
-        inp = np.array(inp)
-    if inp.ndim == 2:
-        img = Image.fromarray(inp[...])
-    elif inp.ndim == 3:
-        img = Image.fromarray(inp[..., ::-1])
-    else:
-        raise ValueError("Input array must be a 2D or 3D numpy array.")
-
-    if not os.path.exists(os.path.dirname(output_dir)):
-        os.makedirs(os.path.dirname(output_dir))
-
-    img.save(output_dir, quality=100)
-
-
 def load_pretrained_weights(model, checkpoint_path):
     """智能权重加载方案（支持输入通道变化，如RGB→RGB+mask）"""
 
@@ -616,7 +586,7 @@ def quantize_nafnet(
     qconfig_type='ort',
     device='cuda',
     skip_sensitivity_analysis=True,
-    sensitivity_calib_samples=2
+    sensitivity_calib_samples=5
 ):
     """
     量化 NAFNet 模型
@@ -655,6 +625,7 @@ def quantize_nafnet(
         sensitivity_scores = analyzer.analyze(
             dummy_input,
             calib_data=calib_data,
+            skip_layers=["gf"],
             max_calib_samples=sensitivity_calib_samples
         )
 
@@ -902,7 +873,11 @@ class ONNXRuntimeInference:
         if providers is None:
             providers = ['CPUExecutionProvider']
 
-        self.session = ort.InferenceSession(onnx_path, providers=providers)
+        # 启用所有图优化，这样才能正确融合 QDQ 节点
+        sess_options = ort.SessionOptions()
+        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        
+        self.session = ort.InferenceSession(onnx_path, sess_options, providers=providers)
         self.input_name = self.session.get_inputs()[0].name
         self.output_names = [output.name for output in self.session.get_outputs()]
 
@@ -1253,9 +1228,7 @@ if __name__ == "__main__":
     if args.mode == 'fp32':
         print("\n🎯 运行 FP32 推理模式")
         main_main()
-    elif args.mode == 'quant':
-        print("\n🎯 运行量化模式")
-        main_with_quantization()
+
     elif args.mode == 'compare':
         print("\n🎯 运行对比模式")
         main_with_quantization()
