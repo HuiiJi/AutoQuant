@@ -44,6 +44,7 @@ AutoQuant 是一套专业的模型量化工具链，专为AI摄影图像美化�
 autoquant/
 ├── src/                       # 核心源码
 │   ├── __init__.py
+│   ├── cli.py                 # 命令行工具
 │   ├── core/                   # 核心定义
 │   │   ├── __init__.py
 │   │   ├── dtype.py            # 数据类型和量化方案
@@ -52,12 +53,16 @@ autoquant/
 │   │   ├── __init__.py
 │   │   ├── base.py             # Observer 基类
 │   │   ├── min_max_observer.py # MinMaxObserver
-│   │   └── histogram_observer.py # HistogramObserver
+│   │   ├── ema_min_max_observer.py # EMA 版 MinMaxObserver
+│   │   ├── histogram_observer.py # HistogramObserver
+│   │   ├── percentile_observer.py # PercentileObserver
+│   │   └── mse_observer.py    # MSEObserver
 │   ├── fake_quant/             # FakeQuant 模块
 │   │   ├── __init__.py
 │   │   ├── base.py             # FakeQuant 基类
 │   │   ├── ptq.py              # PTQFakeQuantize
-│   │   └── lsq.py              # LSQFakeQuantize
+│   │   ├── lsq.py              # LSQFakeQuantize
+│   │   └── pact.py             # PACTFakeQuantize
 │   ├── quantization/           # 量化核心逻辑
 │   │   ├── __init__.py
 │   │   ├── model_quantizer.py  # 模型量化器
@@ -65,16 +70,19 @@ autoquant/
 │   ├── utils/                  # 工具模块
 │   │   ├── __init__.py
 │   │   ├── qconfig.py          # QConfig 配置（TRT/ORT 最佳方案）
-│   │   └── sensitivity_analysis.py # 敏感度分析
+│   │   ├── sensitivity_analysis.py # 敏感度分析
+│   │   ├── quantizable_ops.py  # 可量化操作工具
+│   │   └── mixed_precision.py   # 混合精度工具
 │   ├── onnx_export/            # ONNX 导出
 │   │   ├── __init__.py
 │   │   ├── exporter.py         # 导出器
-│   │   └── onnx_optimizer.py   # ONNX 优化器
+│   │   ├── onnx_optimizer.py   # ONNX 优化器
+│   │   └── engine_adapter.py   # 引擎适配器（TRT/ORT）
 │   ├── evaluation/             # 量化评估模块
 │   │   ├── __init__.py
 │   │   ├── evaluator.py        # 量化评估器
 │   │   └── metrics.py          # 评估指标（PSNR、SSIM 等）
-│   └── special_models/         # 特殊模型支持
+│   └── models/                 # 特殊模型支持
 │       ├── __init__.py
 │       └── nafnet.py           # NAFNet 模型支持
 ├── tests/                      # 测试
